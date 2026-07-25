@@ -147,6 +147,29 @@ class MatchBundle:
                     best[sign] = value
         return best
 
+    def opportunities(
+        self, odds_range: tuple[float, float] | None = None
+    ) -> list[tuple[str, float, float, float]]:
+        """Marches cotes, tries par valeur decroissante.
+
+        Retourne des tuples `(marche, cote, probabilite du modele, valeur en %)`. La
+        valeur est l'esperance de gain par euro mise, `cote * probabilite - 1` : elle
+        n'est positive que si le modele juge l'issue plus probable que le marche.
+        """
+        if not self.poisson or not self.poisson.markets:
+            return []
+        found: list[tuple[str, float, float, float]] = []
+        for sign, odds in self.best_odds().items():
+            market = "N" if sign == "X" else sign  # le nul s'ecrit X chez les bookmakers
+            probability = self.poisson.markets.get(market)
+            if probability is None:
+                continue
+            if odds_range and not odds_range[0] <= odds <= odds_range[1]:
+                continue
+            value = round(100 * (odds * probability / 100 - 1), 1)
+            found.append((market, odds, probability, value))
+        return sorted(found, key=lambda item: item[3], reverse=True)
+
     def value_gap(self) -> dict[str, float] | None:
         """Ecart, en points, entre la probabilite Poisson et celle implicite des cotes.
 

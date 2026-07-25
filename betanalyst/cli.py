@@ -71,6 +71,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="COTE",
         help="cote minimale sur le pronostic Forebet, ex. 1.5",
     )
+    parser.add_argument(
+        "--odds-range",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("MIN", "MAX"),
+        help="ne garder que les matchs offrant une cote dans cette fourchette, "
+        "ex. --odds-range 1.65 1.95 ; les matchs sont tries par valeur decroissante",
+    )
     parser.add_argument("--demo", action="store_true", help="donnees fictives, aucun acces reseau")
     parser.add_argument("--verbose", "-v", action="store_true", help="logs detailles")
     return parser.parse_args(argv)
@@ -109,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             odds_csv=args.odds_csv,
             min_probability=args.min_prob,
             min_odds=args.min_odds,
+            odds_range=tuple(args.odds_range) if args.odds_range else None,
         )
     except FetchError as exc:
         print(f"Collecte impossible : {exc}", file=sys.stderr)

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betanalyst import demo, poisson
 from betanalyst.config import AppConfig
-from betanalyst.models import ForebetPrediction
+from betanalyst.models import BookmakerLine, ForebetPrediction, MatchBundle
 from betanalyst.pipeline import build_bundles, filter_predictions
 from betanalyst.report import build_markdown
 from betanalyst.sources import bookmakers
@@ -161,6 +161,28 @@ class TestOddsFiltering(unittest.TestCase):
         )
         self.assertEqual(kept, [])
 
+    def test_keeps_only_matches_priced_in_range(self) -> None:
+        kept = filter_predictions(
+            [self.prediction],
+            self.entries,
+            only_bettable=True,
+            min_probability=None,
+            min_odds=None,
+            odds_range=(1.65, 1.95),
+        )
+        self.assertEqual(kept, [])
+
+        self.entries[0].odds["1"] = 1.80
+        kept = filter_predictions(
+            [self.prediction],
+            self.entries,
+            only_bettable=True,
+            min_probability=None,
+            min_odds=None,
+            odds_range=(1.65, 1.95),
+        )
+        self.assertEqual(len(kept), 1)
+
     def test_drops_match_absent_from_bookmakers(self) -> None:
         kept = filter_predictions(
             [ForebetPrediction(home_team="Brest", away_team="Nice", prob_home=99.0)],
@@ -170,6 +192,27 @@ class TestOddsFiltering(unittest.TestCase):
             min_odds=None,
         )
         self.assertEqual(kept, [])
+
+
+class TestOpportunities(unittest.TestCase):
+    def _bundle(self) -> MatchBundle:
+        stats = demo.stats_for("Olympique Lyonnais", "Stade Rennais")
+        return MatchBundle(
+            stats=stats,
+            poisson=poisson.compute(stats),
+            bookmakers=[BookmakerLine(bookmaker="Unibet", odds={"1": 1.80, "X": 3.60, "2": 4.20})],
+        )
+
+    def test_value_is_positive_when_model_beats_the_price(self) -> None:
+        bundle = self._bundle()
+        market, odds, probability, value = bundle.opportunities()[0]
+        self.assertEqual(market, "1")
+        self.assertAlmostEqual(value, 100 * (odds * probability / 100 - 1), places=1)
+        self.assertGreater(value, 0)
+
+    def test_range_excludes_prices_outside_the_window(self) -> None:
+        markets = {item[0] for item in self._bundle().opportunities((1.65, 1.95))}
+        self.assertEqual(markets, {"1"})
 
 
 class TestPipelineOffline(unittest.TestCase):

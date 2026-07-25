@@ -64,9 +64,19 @@ python -m betanalyst --matches 20 --only-bettable
 # pronostic Forebet à au moins 95 %, avec une cote d'au moins 1.5 sur ce pronostic
 python -m betanalyst --matches 20 --only-bettable --min-prob 95 --min-odds 1.5
 
+# uniquement les matchs offrant une cote entre 1.65 et 1.95, tries par valeur
+python -m betanalyst --matches 20 --only-bettable --odds-range 1.65 1.95
+
 # sans les cotes
 python -m betanalyst --matches 5 --no-bookmakers
 ```
+
+Avec `--odds-range`, le rapport s'ouvre sur une section **Sélection** : un tableau
+récapitulatif donnant, pour chaque match, le marché coté le plus intéressant, sa cote,
+la probabilité du modèle et la **valeur** (`cote × probabilité − 1`, l'espérance de gain
+par euro misé si le modèle a raison). En dessous de +5 % l'écart est dans le bruit du
+modèle ; au-dessus de +20 %, il faut suspecter une donnée manquante plutôt qu'une
+aubaine.
 
 > Une probabilité de 95 % correspond mécaniquement à une cote d'environ 1.05. Un
 > pronostic à 95 % assorti d'une cote élevée signifie que Forebet et le bookmaker sont

@@ -104,6 +104,7 @@ def filter_predictions(
     only_bettable: bool,
     min_probability: float | None,
     min_odds: float | None,
+    odds_range: tuple[float, float] | None = None,
 ) -> list[ForebetPrediction]:
     """Ne garde que les rencontres cotees et conformes aux seuils demandes."""
     kept: list[ForebetPrediction] = []
@@ -112,6 +113,12 @@ def filter_predictions(
         if only_bettable and not lines:
             log.info("Ecarte (non cote chez les bookmakers) : %s", prediction.home_team)
             continue
+
+        if odds_range:
+            low, high = odds_range
+            in_range = any(low <= value <= high for line in lines for value in line.odds.values())
+            if not in_range:
+                continue
 
         probability = prediction.best_probability
         if min_probability is not None and (probability is None or probability < min_probability):
@@ -182,6 +189,7 @@ def run(
     odds_csv: Path | None = None,
     min_probability: float | None = None,
     min_odds: float | None = None,
+    odds_range: tuple[float, float] | None = None,
 ) -> list[tuple[MatchBundle, Analysis | None]]:
     if matches:
         predictions = [parse_match_argument(text) for text in matches]
@@ -206,6 +214,7 @@ def run(
             only_bettable=only_bettable,
             min_probability=min_probability,
             min_odds=min_odds,
+            odds_range=odds_range,
         )
         log.info("%d rencontres retenues sur %d apres filtrage", len(predictions), before)
         if not predictions:
@@ -215,4 +224,11 @@ def run(
     bundles = build_bundles(
         predictions, cfg, use_flashscore=use_flashscore, offline=offline, odds=odds
     )
+    if odds_range:
+        bundles.sort(
+            key=lambda bundle: max(
+                (item[3] for item in bundle.opportunities(odds_range)), default=float("-inf")
+            ),
+            reverse=True,
+        )
     return analyse_bundles(bundles, cfg, use_llm=use_llm)

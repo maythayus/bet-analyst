@@ -134,9 +134,40 @@ def _form_block(bundle: MatchBundle) -> str:
     return "\n".join(lines) if lines else "_Statistiques Flashscore indisponibles._"
 
 
+def _selection_block(bundles: list[MatchBundle]) -> str:
+    """Recapitulatif en tete de rapport : le meilleur marche cote de chaque match."""
+    rows = [
+        "| Match | Marche | Cote | Proba modele | Valeur |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    found = False
+    for bundle in bundles:
+        opportunities = bundle.opportunities()
+        if not opportunities:
+            continue
+        found = True
+        market, odds, probability, value = opportunities[0]
+        rows.append(
+            f"| {bundle.label} | {market} | {odds:.2f} | {probability:.1f} % | {value:+.1f} % |"
+        )
+    if not found:
+        return ""
+    rows += [
+        "",
+        "_Valeur = esperance de gain par euro mise si le modele a raison. En dessous de "
+        "+5 %, l'ecart est dans le bruit du modele ; au-dessus de +20 %, suspecte plutot "
+        "une donnee manquante ou une equipe mal identifiee qu'une aubaine._",
+    ]
+    return "\n".join(rows)
+
+
 def build_markdown(pairs: list[tuple[MatchBundle, Analysis | None]]) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     parts = [f"# Rapport d'analyse - {now}", "", DISCLAIMER, ""]
+
+    selection = _selection_block([bundle for bundle, _ in pairs])
+    if selection:
+        parts += ["## Selection", selection, "", "---", ""]
 
     for bundle, analysis in pairs:
         parts.append(f"## {bundle.label}")
