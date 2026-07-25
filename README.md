@@ -53,18 +53,18 @@ Options utiles : `--model`, `--base-url`, `--temperature`, `--output`, `--no-cac
 
 ### Si Forebet renvoie un contrôle anti-bot
 
-Forebet est derrière Cloudflare. Le script tente d'abord une requête HTTP simple, puis
-rebascule automatiquement sur Chromium (profil persistant : le cookie `cf_clearance`
-est réutilisé ensuite). Si le contrôle bloque quand même :
+Forebet est derrière Cloudflare, qui bloque aussi bien la requête HTTP directe que
+Chromium piloté par Playwright. **La méthode qui fonctionne** est d'enregistrer la page
+depuis ton navigateur habituel (Ctrl+S, « Page Web, complète ») puis :
 
 ```powershell
-# 1) résoudre le contrôle à la main une fois, fenêtre visible
-$env:FLASHSCORE_HEADLESS="0"; python -m betanalyst --matches 5
+# guillemets obligatoires : le nom du fichier contient des espaces
+python -m betanalyst --forebet-html "C:\Users\<toi>\Desktop\Football Predictions for Today _ Forebet.htm"
+```
 
-# 2) ou enregistrer la page depuis ton navigateur (Ctrl+S) et la relire
-python -m betanalyst --forebet-html C:\chemin\forebet.html
+Sinon, on se passe complètement de Forebet (Flashscore + Poisson + LLM) :
 
-# 3) ou se passer complètement de Forebet
+```powershell
 python -m betanalyst --match "Lyon vs Rennes" --match "Getafe vs Athletic Bilbao"
 ```
 
@@ -114,9 +114,10 @@ python -m ruff check .
 
 - Le HTML de Forebet et de Flashscore change régulièrement : le parsing est défensif
   mais les sélecteurs de `sources/` sont à réajuster si un site se réorganise.
-- Le scraping Flashscore a été validé en conditions réelles ; celui de Forebet n'a pas
-  pu l'être depuis la machine de développement (Cloudflare bloque l'IP), d'où les trois
-  contournements ci-dessus.
+- Le scraping direct de Forebet est bloqué par Cloudflare (testé en IP datacenter et en
+  IP résidentielle, headless et fenêtre visible) : utilise `--forebet-html`. Le parser
+  lui-même est validé, il extrait bien les prédictions d'une page enregistrée.
+- Comptez environ 5 s par équipe : 10 matchs = 20 pages Flashscore à charger.
 - La forme récente inclut les matchs amicaux : en pré-saison, les moyennes de buts sont
   à prendre avec des pincettes (le modèle les régularise, mais ne les distingue pas).
 - Les cotes `X` et `2` ne sont pas toujours présentes sur le listing Forebet ; elles

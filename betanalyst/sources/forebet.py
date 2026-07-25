@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup, Tag
 
 from betanalyst.config import ScrapeConfig
 from betanalyst.models import ForebetPrediction
-from betanalyst.sources.http import fetch_html
+from betanalyst.sources.http import FetchError, fetch_html
 
 log = logging.getLogger(__name__)
 
@@ -102,6 +102,11 @@ def fetch_predictions(
 ) -> list[ForebetPrediction]:
     """Recupere les predictions du jour, ou relit une page Forebet sauvegardee a la main."""
     if html_file:
+        if not html_file.is_file():
+            raise FetchError(
+                f"Fichier introuvable : {html_file}. Verifie le chemin exact "
+                "(guillemets obligatoires s'il contient des espaces)."
+            )
         log.info("Lecture de %s", html_file)
         html = html_file.read_text(encoding="utf-8", errors="replace")
     else:

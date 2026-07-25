@@ -53,6 +53,7 @@ def fetch_with_browser(url: str, cfg: ScrapeConfig, *, wait_selector: str | None
     le cookie `cf_clearance` est reutilise lors des executions suivantes.
     """
     try:
+        from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import TimeoutError as PlaywrightTimeout
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -85,11 +86,18 @@ def fetch_with_browser(url: str, cfg: ScrapeConfig, *, wait_selector: str | None
                 page.wait_for_timeout(3000)
 
             html = page.content()
+        except PlaywrightError as exc:
+            raise FetchError(
+                f"Navigateur ferme avant la fin du chargement de {url}. "
+                "Laisse la fenetre ouverte le temps que la page des pronostics s'affiche."
+            ) from exc
+        else:
             if _is_challenge(html):
                 raise FetchError(
                     f"{url} affiche un controle anti-bot Cloudflare. "
-                    "Relance avec FLASHSCORE_HEADLESS=0 pour resoudre le controle a la main : "
-                    "le cookie sera memorise dans .cache/browser-profile."
+                    "Enregistre la page depuis ton navigateur (Ctrl+S) et relance avec "
+                    "--forebet-html \"chemin\\vers\\page.htm\", ou passe par "
+                    "--match \"Equipe A vs Equipe B\"."
                 )
             return html
         finally:
