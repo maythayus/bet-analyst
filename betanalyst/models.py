@@ -54,12 +54,33 @@ class ForebetPrediction:
 
     def implied_probabilities(self) -> dict[str, float] | None:
         """Probabilites implicites des cotes, corrigees de la marge du bookmaker."""
-        keys = ("1", "X", "2")
-        if not all(self.odds.get(k) for k in keys):
-            return None
-        raw = {k: 1.0 / self.odds[k] for k in keys}
-        overround = sum(raw.values())
-        return {k: round(100 * v / overround, 2) for k, v in raw.items()}
+        return implied_from_odds(self.odds)
+
+    @property
+    def best_probability(self) -> float | None:
+        """Probabilite du pronostic le plus probable selon Forebet."""
+        values = [p for p in (self.prob_home, self.prob_draw, self.prob_away) if p is not None]
+        return max(values) if values else None
+
+    @property
+    def pick(self) -> str | None:
+        """Signe correspondant a la probabilite la plus elevee : 1, X ou 2."""
+        pairs = [
+            (sign, prob)
+            for sign, prob in (("1", self.prob_home), ("X", self.prob_draw), ("2", self.prob_away))
+            if prob is not None
+        ]
+        return max(pairs, key=lambda pair: pair[1])[0] if pairs else None
+
+
+def implied_from_odds(odds: dict[str, float]) -> dict[str, float] | None:
+    """Convertit des cotes 1X2 en probabilites, marge du bookmaker retiree."""
+    keys = ("1", "X", "2")
+    if not all(odds.get(key) for key in keys):
+        return None
+    raw = {key: 1.0 / odds[key] for key in keys}
+    overround = sum(raw.values())
+    return {key: round(100 * value / overround, 2) for key, value in raw.items()}
 
 
 @dataclass
@@ -90,6 +111,18 @@ class PoissonResult:
     expected_home_goals: float
     expected_away_goals: float
     most_likely_score: str
+    markets: dict[str, float] = field(default_factory=dict)  # "1N et oui" -> probabilite en %
+
+
+@dataclass
+class BookmakerLine:
+    """Cotes 1X2 d'un bookmaker pour la rencontre."""
+
+    bookmaker: str
+    odds: dict[str, float] = field(default_factory=dict)
+
+    def implied_probabilities(self) -> dict[str, float] | None:
+        return implied_from_odds(self.odds)
 
 
 @dataclass
@@ -99,10 +132,37 @@ class MatchBundle:
     stats: MatchStats
     forebet: ForebetPrediction | None = None
     poisson: PoissonResult | None = None
+    bookmakers: list[BookmakerLine] = field(default_factory=list)
 
     @property
     def label(self) -> str:
         return f"{self.stats.home_team} vs {self.stats.away_team}"
+
+    def best_odds(self) -> dict[str, float]:
+        """Meilleure cote disponible pour chaque signe, tous bookmakers confondus."""
+        best: dict[str, float] = {}
+        for line in self.bookmakers:
+            for sign, value in line.odds.items():
+                if value > best.get(sign, 0):
+                    best[sign] = value
+        return best
+
+    def value_gap(self) -> dict[str, float] | None:
+        """Ecart, en points, entre la probabilite Poisson et celle implicite des cotes.
+
+        Un ecart positif signifie que le modele juge l'issue plus probable que le
+        marche : c'est la seule situation ou une mise a une esperance positive, sous
+        reserve que le modele soit juste.
+        """
+        implied = implied_from_odds(self.best_odds())
+        if not implied or not self.poisson:
+            return None
+        model = {
+            "1": self.poisson.prob_home,
+            "X": self.poisson.prob_draw,
+            "2": self.poisson.prob_away,
+        }
+        return {sign: round(model[sign] - implied[sign], 2) for sign in ("1", "X", "2")}
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -115,6 +175,10 @@ class MatchBundle:
                 self.forebet.implied_probabilities() if self.forebet else None
             ),
             "poisson": asdict(self.poisson) if self.poisson else None,
+            "bookmakers": [asdict(line) for line in self.bookmakers],
+            "best_odds": self.best_odds() or None,
+            "implied_from_best_odds": implied_from_odds(self.best_odds()),
+            "value_gap_poisson_vs_market": self.value_gap(),
         }
 
 

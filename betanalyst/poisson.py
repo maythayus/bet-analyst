@@ -7,6 +7,7 @@ obtenir la matrice des scores exacts.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from math import exp, factorial
 
 from betanalyst.models import MatchStats, PoissonResult
@@ -15,6 +16,29 @@ LEAGUE_AVG_GOALS = 1.35  # buts moyens par equipe et par match (championnats eur
 HOME_ADVANTAGE = 1.15
 MAX_GOALS = 8
 SHRINKAGE = 5.0  # pseudo-matchs de regularisation : 5 matchs ne suffisent pas a estimer une force
+
+
+# Marches proposes par les bookmakers francais, exprimes comme un predicat sur le
+# score exact : (buts domicile, buts exterieur, les deux equipes marquent).
+COMBINED_MARKETS: dict[str, Callable[[int, int, bool], bool]] = {
+    "1": lambda h, a, _btts: h > a,
+    "N": lambda h, a, _btts: h == a,
+    "2": lambda h, a, _btts: h < a,
+    "1N": lambda h, a, _btts: h >= a,
+    "12": lambda h, a, _btts: h != a,
+    "N2": lambda h, a, _btts: h <= a,
+    "Les deux marquent : oui": lambda h, a, btts: btts,
+    "Les deux marquent : non": lambda h, a, btts: not btts,
+    "1 et oui": lambda h, a, btts: h > a and btts,
+    "2 et oui": lambda h, a, btts: h < a and btts,
+    "N et oui": lambda h, a, btts: h == a and btts,
+    "1N et oui": lambda h, a, btts: h >= a and btts,
+    "12 et oui": lambda h, a, btts: h != a and btts,
+    "N2 et oui": lambda h, a, btts: h <= a and btts,
+    "1N et non": lambda h, a, btts: h >= a and not btts,
+    "12 et non": lambda h, a, btts: h != a and not btts,
+    "N2 et non": lambda h, a, btts: h <= a and not btts,
+}
 
 
 def _poisson_pmf(k: int, lam: float) -> float:
@@ -62,6 +86,7 @@ def compute(stats: MatchStats) -> PoissonResult | None:
 
     prob_home = prob_draw = prob_away = 0.0
     prob_over_25 = prob_btts = 0.0
+    combined = dict.fromkeys(COMBINED_MARKETS, 0.0)
     best_score, best_prob = "0-0", 0.0
 
     for goals_home in range(MAX_GOALS + 1):
@@ -79,8 +104,12 @@ def compute(stats: MatchStats) -> PoissonResult | None:
 
             if goals_home + goals_away > 2:
                 prob_over_25 += probability
-            if goals_home and goals_away:
+            btts = bool(goals_home and goals_away)
+            if btts:
                 prob_btts += probability
+            for market, predicate in COMBINED_MARKETS.items():
+                if predicate(goals_home, goals_away, btts):
+                    combined[market] += probability
             if probability > best_prob:
                 best_prob, best_score = probability, f"{goals_home}-{goals_away}"
 
@@ -96,4 +125,5 @@ def compute(stats: MatchStats) -> PoissonResult | None:
         expected_home_goals=round(lambda_home, 2),
         expected_away_goals=round(lambda_away, 2),
         most_likely_score=best_score,
+        markets={market: percent(value) for market, value in combined.items()},
     )

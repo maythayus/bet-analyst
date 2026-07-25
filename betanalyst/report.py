@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from betanalyst.models import Analysis, MatchBundle
+from betanalyst.models import Analysis, MatchBundle, implied_from_odds
 
 DISCLAIMER = (
     "> Rapport genere automatiquement. Aucun modele, statistique ou LLM, ne predit "
@@ -39,12 +39,82 @@ def _probability_table(bundle: MatchBundle) -> str:
             f"| Cotes (implicite) | {fmt(implied.get('1'))} | {fmt(implied.get('X'))} | "
             f"{fmt(implied.get('2'))} | - | - |"
         )
+    market = implied_from_odds(bundle.best_odds())
+    if market:
+        rows.append(
+            f"| Marche (meilleure cote) | {fmt(market.get('1'))} | {fmt(market.get('X'))} | "
+            f"{fmt(market.get('2'))} | - | - |"
+        )
     if poisson:
         rows.append(
             f"| Poisson | {fmt(poisson.prob_home)} | {fmt(poisson.prob_draw)} | "
             f"{fmt(poisson.prob_away)} | {fmt(poisson.prob_over_25)} | {fmt(poisson.prob_btts)} |"
         )
     return "\n".join(rows) if len(rows) > 2 else "_Aucune probabilite disponible._"
+
+
+def _odds_block(bundle: MatchBundle) -> str:
+    if not bundle.bookmakers:
+        return ""
+
+    def cell(value: float | None) -> str:
+        return f"{value:.2f}" if value else "-"
+
+    rows = ["| Bookmaker | 1 | X | 2 |", "| --- | --- | --- | --- |"]
+    for line in bundle.bookmakers:
+        rows.append(
+            f"| {line.bookmaker} | {cell(line.odds.get('1'))} | {cell(line.odds.get('X'))} | "
+            f"{cell(line.odds.get('2'))} |"
+        )
+
+    gap = bundle.value_gap()
+    if gap:
+        best = max(gap.items(), key=lambda item: item[1])
+        odds = bundle.best_odds().get(best[0])
+        verdict = (
+            f"Ecart Poisson - marche : 1 {gap['1']:+.1f} pts, X {gap['X']:+.1f} pts, "
+            f"2 {gap['2']:+.1f} pts."
+        )
+        if best[1] > 0 and odds:
+            verdict += (
+                f" Seul signe ou le modele est plus optimiste que le marche : **{best[0]}** "
+                f"(cote {odds:.2f}). A ne considerer que si les donnees sont completes."
+            )
+        else:
+            verdict += " Aucun signe ou le modele bat le marche : pas de valeur detectee."
+        rows += ["", verdict]
+    return "\n".join(rows)
+
+
+def _markets_block(bundle: MatchBundle, *, top: int = 8) -> str:
+    """Marches classes par probabilite, avec la cote minimale a exiger."""
+    if not bundle.poisson or not bundle.poisson.markets:
+        return ""
+
+    available = bundle.best_odds()
+    rows = [
+        "| Marche | Proba modele | Cote equitable | Cote dispo | Valeur |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    ranked = sorted(bundle.poisson.markets.items(), key=lambda item: item[1], reverse=True)
+    for market, probability in ranked[:top]:
+        if probability <= 0:
+            continue
+        fair = 100 / probability
+        offered = available.get(market)
+        value = "-"
+        if offered:
+            value = f"{(offered * probability / 100 - 1) * 100:+.1f} %"
+        rows.append(
+            f"| {market} | {probability:.1f} % | {fair:.2f} | "
+            f"{f'{offered:.2f}' if offered else '-'} | {value} |"
+        )
+    rows += [
+        "",
+        "_Cote equitable = cote en dessous de laquelle le pari perd de l'argent si le "
+        "modele a raison. « Valeur » compare la cote proposee a cette cote equitable._",
+    ]
+    return "\n".join(rows)
 
 
 def _form_block(bundle: MatchBundle) -> str:
@@ -74,6 +144,12 @@ def build_markdown(pairs: list[tuple[MatchBundle, Analysis | None]]) -> str:
         if meta:
             parts.append(f"_{meta}_")
         parts += ["", "### Donnees", _form_block(bundle), "", _probability_table(bundle), ""]
+        odds_block = _odds_block(bundle)
+        if odds_block:
+            parts += ["### Cotes bookmakers", odds_block, ""]
+        markets_block = _markets_block(bundle)
+        if markets_block:
+            parts += ["### Marches (modele Poisson)", markets_block, ""]
         if analysis:
             parts += [f"### Analyse LLM ({analysis.model})", analysis.markdown, ""]
         else:

@@ -20,8 +20,12 @@ Regles absolues :
 - Si une donnee manque, tu l'ecris explicitement au lieu de la deviner.
 - Tu raisonnes etape par etape, puis tu conclus.
 - Chaque affirmation est assortie d'une confiance de 1 a 10.
-- Tu confrontes systematiquement trois sources : les stats Flashscore, la prediction
-  Forebet et le modele de Poisson. Tu signales les desaccords entre elles.
+- Tu confrontes systematiquement quatre sources : les stats Flashscore, la prediction
+  Forebet, le modele de Poisson et les cotes des bookmakers. Tu signales les desaccords.
+- Une cote n'a d'interet que si la probabilite du modele depasse la probabilite
+  implicite de cette cote. Tu le verifies avant de recommander un marche.
+- Tu couvres les marches combines fournis (1N, 12, N2, les deux marquent, et leurs
+  combinaisons) et pas seulement le resultat sec.
 - Tu rappelles qu'aucune prediction n'est certaine.
 
 Format de reponse (Markdown, sans preambule) :
@@ -42,6 +46,9 @@ Donnees (JSON) :
 
 Rappels : les probabilites Forebet sont en %, celles du modele de Poisson aussi.
 Les moyennes de buts portent sur les 5 derniers matchs disponibles.
+`poisson.markets` donne la probabilite de chaque marche combine ; `bookmakers` et
+`best_odds` donnent les cotes reellement disponibles ; `value_gap_poisson_vs_market`
+donne l'ecart en points entre le modele et le marche pour 1, X et 2.
 """
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)

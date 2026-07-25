@@ -11,8 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from betanalyst import demo, poisson
 from betanalyst.config import AppConfig
 from betanalyst.models import ForebetPrediction
-from betanalyst.pipeline import build_bundles
+from betanalyst.pipeline import build_bundles, filter_predictions
 from betanalyst.report import build_markdown
+from betanalyst.sources import bookmakers
 from betanalyst.sources.forebet import parse_predictions
 
 SAMPLE_HTML = """
@@ -75,6 +76,100 @@ class TestPoisson(unittest.TestCase):
         stats = demo.stats_for("Getafe", "Athletic Bilbao")
         stats_without_form = type(stats)(home_team=stats.home_team, away_team=stats.away_team)
         self.assertIsNone(poisson.compute(stats_without_form))
+
+
+class TestCombinedMarkets(unittest.TestCase):
+    def setUp(self) -> None:
+        stats = demo.stats_for("Olympique Lyonnais", "Stade Rennais")
+        self.markets = poisson.compute(stats).markets
+
+    def test_double_chance_is_the_sum_of_its_parts(self) -> None:
+        self.assertAlmostEqual(
+            self.markets["1N"], self.markets["1"] + self.markets["N"], delta=0.05
+        )
+        self.assertAlmostEqual(
+            self.markets["12"], self.markets["1"] + self.markets["2"], delta=0.05
+        )
+
+    def test_btts_yes_and_no_are_complementary(self) -> None:
+        total = self.markets["Les deux marquent : oui"] + self.markets["Les deux marquent : non"]
+        self.assertAlmostEqual(total, 100.0, delta=0.5)
+
+    def test_combined_market_is_narrower_than_its_components(self) -> None:
+        self.assertLess(self.markets["1N et oui"], self.markets["1N"])
+        self.assertLess(self.markets["1N et oui"], self.markets["Les deux marquent : oui"])
+
+
+UNIBET_PAGE = {
+    "items": {
+        "e1": {"a": "Lyon", "b": "Rennes", "pdesc": "Ligue 1", "start": "2607252100"},
+        "m9": {"parent": "e1", "style": "WIN_DRAW_WIN", "desc": "1 N 2"},
+        "o1": {"parent": "m9", "desc": "Lyon", "price": "1,80", "pos": 1},
+        "o2": {"parent": "m9", "desc": "N", "price": "3,60", "pos": 2},
+        "o3": {"parent": "m9", "desc": "Rennes", "price": "4,20", "pos": 3},
+    }
+}
+
+
+class TestBookmakers(unittest.TestCase):
+    def test_parses_prices_and_signs(self) -> None:
+        (entry,) = bookmakers._parse_unibet_page(UNIBET_PAGE)
+        self.assertTrue(entry.complete)
+        self.assertEqual(entry.odds, {"1": 1.80, "X": 3.60, "2": 4.20})
+        self.assertEqual(entry.competition, "Ligue 1")
+
+    def test_matches_teams_despite_naming_differences(self) -> None:
+        self.assertTrue(bookmakers.teams_match("Olympique Lyonnais", "Lyonnais"))
+        self.assertTrue(bookmakers.teams_match("FC Bohemians 1905", "Bohemians 1905"))
+        self.assertTrue(bookmakers.teams_match("Stade Rennais", "Rennes"))
+        self.assertFalse(bookmakers.teams_match("Lyon", "Rennes"))
+        self.assertFalse(bookmakers.teams_match("Manchester City", "Manchester United"))
+
+    def test_find_uses_both_teams(self) -> None:
+        entries = bookmakers._parse_unibet_page(UNIBET_PAGE)
+        self.assertIsNotNone(bookmakers.find(entries, "Lyon", "Stade Rennais"))
+        self.assertIsNone(bookmakers.find(entries, "Lyon", "Monaco"))
+
+
+class TestOddsFiltering(unittest.TestCase):
+    def setUp(self) -> None:
+        self.prediction = ForebetPrediction(
+            home_team="Lyon", away_team="Rennes", prob_home=96.0, prob_draw=2.0, prob_away=2.0
+        )
+        self.entries = [
+            bookmakers.BookmakerOdds(
+                bookmaker="Unibet",
+                home_team="Lyon",
+                away_team="Rennes",
+                odds={"1": 1.20, "X": 6.0, "2": 12.0},
+            )
+        ]
+
+    def test_keeps_high_probability_pick(self) -> None:
+        kept = filter_predictions(
+            [self.prediction],
+            self.entries,
+            only_bettable=True,
+            min_probability=95,
+            min_odds=None,
+        )
+        self.assertEqual(len(kept), 1)
+
+    def test_drops_pick_below_minimum_odds(self) -> None:
+        kept = filter_predictions(
+            [self.prediction], self.entries, only_bettable=True, min_probability=95, min_odds=1.5
+        )
+        self.assertEqual(kept, [])
+
+    def test_drops_match_absent_from_bookmakers(self) -> None:
+        kept = filter_predictions(
+            [ForebetPrediction(home_team="Brest", away_team="Nice", prob_home=99.0)],
+            self.entries,
+            only_bettable=True,
+            min_probability=None,
+            min_odds=None,
+        )
+        self.assertEqual(kept, [])
 
 
 class TestPipelineOffline(unittest.TestCase):

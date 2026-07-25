@@ -43,6 +43,34 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="page Forebet sauvegardee a la main (contourne le blocage anti-bot)",
     )
+    parser.add_argument(
+        "--no-bookmakers", action="store_true", help="ne pas recuperer les cotes Unibet"
+    )
+    parser.add_argument(
+        "--only-bettable",
+        action="store_true",
+        help="ne garder que les rencontres cotees chez un bookmaker",
+    )
+    parser.add_argument(
+        "--odds-csv",
+        type=Path,
+        default=None,
+        help="cotes saisies a la main (ParionsSport), format 'match;1;X;2'",
+    )
+    parser.add_argument(
+        "--min-prob",
+        type=float,
+        default=None,
+        metavar="PCT",
+        help="probabilite Forebet minimale du pronostic, ex. 95",
+    )
+    parser.add_argument(
+        "--min-odds",
+        type=float,
+        default=None,
+        metavar="COTE",
+        help="cote minimale sur le pronostic Forebet, ex. 1.5",
+    )
     parser.add_argument("--demo", action="store_true", help="donnees fictives, aucun acces reseau")
     parser.add_argument("--verbose", "-v", action="store_true", help="logs detailles")
     return parser.parse_args(argv)
@@ -76,9 +104,17 @@ def main(argv: list[str] | None = None) -> int:
             offline=args.demo,
             forebet_html=args.forebet_html,
             matches=args.match,
+            use_bookmakers=not args.no_bookmakers,
+            only_bettable=args.only_bettable,
+            odds_csv=args.odds_csv,
+            min_probability=args.min_prob,
+            min_odds=args.min_odds,
         )
     except FetchError as exc:
         print(f"Collecte impossible : {exc}", file=sys.stderr)
+        return 2
+    except FileNotFoundError as exc:
+        print(f"Fichier introuvable : {exc}", file=sys.stderr)
         return 2
     except ValueError as exc:
         print(f"Argument invalide : {exc}", file=sys.stderr)
