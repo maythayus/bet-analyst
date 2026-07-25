@@ -1,0 +1,20 @@
+[project]
+name = "betanalyst"
+version = "0.1.0"
+description = "Analyse de paris sportifs : Forebet + Flashscore + Poisson + LLM local (LM Studio)"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.32.0",
+    "beautifulsoup4>=4.12.3",
+    "playwright>=1.45.0",
+]
+
+[project.scripts]
+betanalyst = "betanalyst.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
