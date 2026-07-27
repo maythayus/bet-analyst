@@ -72,6 +72,43 @@ mise, gagnante ou perdante. Aucun logiciel ne supprime cette marge.
 > Aucun modèle, statistique ou LLM, ne prédit un résultat sportif de manière fiable.
 > Cet outil est une aide à la décision, pas un oracle. Joue de façon responsable.
 
+## Matériel
+
+Le seul élément exigeant est le LLM local. Le reste (scraping, Poisson, rapports) tourne
+sur n'importe quelle machine : quelques centaines de Mo de RAM et aucun GPU.
+
+Modèle de référence : **DeepSeek-R1-Distill-Llama-8B** (8 milliards de paramètres),
+chargé dans LM Studio.
+
+| Quantification | Taille du fichier | VRAM à prévoir | Commentaire |
+| --- | --- | --- | --- |
+| `Q4_K_M` | ~4.9 Go | **8 Go** | le bon compromis, celui utilisé ici |
+| `Q5_K_M` | ~5.7 Go | 10 Go | légèrement meilleur, à partir de 12 Go de VRAM |
+| `Q8_0` | ~8.5 Go | 12 Go | gain marginal pour cet usage |
+
+La VRAM indiquée inclut le contexte : à 16384 tokens, le cache occupe environ 1 Go
+en plus du fichier. Sur une **RTX 5070 (12 Go)**, `Q4_K_M` avec 16384 tokens tient
+largement, GPU offload au maximum, et un match s'analyse en quelques secondes.
+
+| Composant | Minimum | Confortable |
+| --- | --- | --- |
+| GPU | 8 Go de VRAM (RTX 3060, 4060) | 12 Go et plus (RTX 4070, 5070) |
+| RAM système | 8 Go | 16 Go |
+| Disque | 10 Go libres (modèle + Chromium + caches) | 20 Go |
+| Connexion | indispensable (Unibet, Flashscore) | — |
+
+**Sans GPU suffisant**, deux voies :
+
+- Laisser LM Studio décharger une partie des couches sur le CPU : ça fonctionne, mais
+  comptez plusieurs minutes par match plutôt que quelques secondes.
+- Prendre un modèle plus léger, par exemple `qwen2.5-7b-instruct` en `Q4_K_M` (~4.7 Go)
+  ou `llama-3.2-3b-instruct` en `Q4_K_M` (~2 Go), avec
+  `python -m betanalyst --model <identifiant>`.
+
+**Sans LLM du tout**, `--no-llm` produit le rapport complet — probabilités, cotes, valeur,
+ticket — sans le commentaire rédigé. C'est la partie chiffrée, et elle ne dépend pas du
+modèle : le LLM ne fait que commenter, il ne calcule rien.
+
 ## Prérequis
 
 | Élément | Version | À quoi ça sert |
