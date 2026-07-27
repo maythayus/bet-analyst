@@ -60,6 +60,25 @@ def collect_odds(cfg: AppConfig, *, odds_csv: Path | None = None) -> list[Bookma
     return entries
 
 
+def enrich_with_detailed_markets(
+    predictions: list[ForebetPrediction], entries: list[BookmakerOdds], cfg: AppConfig
+) -> None:
+    """Complete les cotes des rencontres retenues avec leur page detail Unibet.
+
+    Le listing ne donne que le 1 N 2 ; la page de chaque rencontre expose aussi « les
+    deux equipes marquent », les doubles chances et leurs combinaisons. Une requete
+    par rencontre retenue, d'ou l'appel apres le filtrage.
+    """
+    for entry in entries:
+        if not entry.url:
+            continue
+        if any(
+            bookmakers.fixture_matches(entry, prediction.home_team, prediction.away_team)
+            for prediction in predictions
+        ):
+            entry.odds.update(bookmakers.fetch_event_markets(entry, cfg.scrape))
+
+
 def _lines_for(
     prediction: ForebetPrediction, entries: list[BookmakerOdds]
 ) -> list[BookmakerLine]:
@@ -190,6 +209,7 @@ def run(
     min_probability: float | None = None,
     min_odds: float | None = None,
     odds_range: tuple[float, float] | None = None,
+    detailed_odds: bool = True,
 ) -> list[tuple[MatchBundle, Analysis | None]]:
     if matches:
         predictions = [parse_match_argument(text) for text in matches]
@@ -220,6 +240,8 @@ def run(
         if not predictions:
             log.warning("Aucune rencontre ne passe les filtres demandes")
             return []
+        if detailed_odds:
+            enrich_with_detailed_markets(predictions, odds, cfg)
 
     bundles = build_bundles(
         predictions, cfg, use_flashscore=use_flashscore, offline=offline, odds=odds

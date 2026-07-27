@@ -57,6 +57,12 @@ Les cotes 1 N 2 des 50 prochains matchs sont récupérées automatiquement sur l
 publique d'Unibet France, puis appariées aux prédictions Forebet malgré les
 différences de nommage (« Stade Rennais » ↔ « Rennes »).
 
+Ce listing ne contient que le 1 N 2. Pour chaque match retenu par les filtres, la page
+Unibet de la rencontre est ensuite ouverte : elle fournit les cotes **les deux équipes
+marquent** (oui / non), les **doubles chances** et leurs **combinaisons** (`1N et oui`,
+`N2 et non`…). C'est une requête par match, d'où `--no-detailed-odds` si tu veux aller
+plus vite sans ces marchés.
+
 ```powershell
 # ne garder que les matchs cotés chez un bookmaker
 python -m betanalyst --matches 20 --only-bettable
@@ -72,6 +78,9 @@ python -m betanalyst --matches 20 --combo 4 --combo-market "Les deux marquent : 
 
 # ... et seulement s'il a au moins 25 % de chances de passer
 python -m betanalyst --matches 20 --combo 4 --min-combo-prob 25
+
+# sans ouvrir la page de chaque match (pas de cote BTTS ni de combines)
+python -m betanalyst --matches 20 --only-bettable --no-detailed-odds
 
 # sans les cotes
 python -m betanalyst --matches 5 --no-bookmakers
@@ -156,7 +165,7 @@ Les rapports sont écrits dans `out/` : `rapport-<date>.md` (lisible) et
 | --- | --- |
 | `betanalyst/sources/forebet.py` | scraping du listing Forebet (requests + BeautifulSoup) |
 | `betanalyst/sources/flashscore.py` | recherche des équipes (API JSON) + derniers résultats via Playwright |
-| `betanalyst/sources/bookmakers.py` | cotes Unibet, lecture d'un CSV manuel, appariement des noms d'équipes |
+| `betanalyst/sources/bookmakers.py` | cotes Unibet (listing 1 N 2 + marchés de la page match), CSV manuel, appariement des noms d'équipes |
 | `betanalyst/poisson.py` | buts attendus, 1X2, over 2.5, BTTS, score le plus probable |
 | `betanalyst/llm.py` | client LM Studio + prompt système « analyste rigoureux » |
 | `betanalyst/pipeline.py` | orchestration, dégradation propre si une source manque |
@@ -193,8 +202,10 @@ python -m ruff check .
   à prendre avec des pincettes (le modèle les régularise, mais ne les distingue pas).
 - Les cotes `X` et `2` ne sont pas toujours présentes sur le listing Forebet ; elles
   peuvent être complétées à la main dans le JSON.
-- L'API Unibet n'expose que les 50 prochaines rencontres et le marché 1 N 2 ; les cotes
-  des marchés combinés doivent être saisies via `--odds-csv`.
+- L'API Unibet n'expose que les 50 prochaines rencontres ; les marchés combinés viennent
+  de la page de chaque rencontre, dont la structure HTML peut changer sans préavis.
+- Seul le temps réglementaire (« 90 Mins ») est lu : les marchés de mi-temps n'ont pas
+  d'équivalent dans le modèle.
 - ParionsSport n'est pas accessible automatiquement (captcha DataDome) : saisie manuelle.
 - Usage strictement personnel : respecte les CGU des deux sites et le `robots.txt`
   (délai de politesse de 2 s et cache local d'1 h intégrés).

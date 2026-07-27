@@ -1,9 +1,13 @@
-"""Cotes 1X2 des bookmakers francais.
+"""Cotes des bookmakers francais.
 
-Unibet expose une API JSON publique (`/lvs-api/`) qui liste les rencontres a venir
-avec leurs marches. ParionsSport (FDJ) utilise la meme technologie mais protege son
-API derriere DataDome : on passe alors par un fichier CSV rempli a la main
-(`--odds-csv`), format `match;1;X;2`.
+Unibet expose une API JSON publique (`/lvs-api/`) qui liste les rencontres a venir,
+mais avec le seul marche 1 N 2. Les autres marches (les deux equipes marquent, double
+chance, et leurs combinaisons) sont rendus cote serveur dans la page detail de chaque
+rencontre : `fetch_event_markets` les y lit.
+
+ParionsSport (FDJ) utilise la meme technologie mais protege son API derriere
+DataDome : on passe alors par un fichier CSV rempli a la main (`--odds-csv`), format
+`match;1;X;2`.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 import requests
+from bs4 import BeautifulSoup
 
 from betanalyst.config import USER_AGENT, ScrapeConfig
 
@@ -37,9 +42,26 @@ UNIBET_HEADERS = {
     "Origin": "https://www.unibet.fr",
     "X-Requested-With": "XMLHttpRequest",
 }
+UNIBET_SITE = "https://www.unibet.fr"
 WIN_DRAW_WIN = "WIN_DRAW_WIN"
 SIMILARITY_THRESHOLD = 0.6
 DRAW_LABELS = {"match nul", "nul", "draw", "x", "n"}
+YES_LABELS = {"oui", "yes"}
+NO_LABELS = {"non", "no"}
+
+# Cartes de la page detail dont les cotes correspondent a un marche du modele. Les
+# titres sont compares une fois les accents retires ; seul le temps reglementaire
+# ("90 mins") est retenu, les mi-temps n'ont pas d'equivalent dans le modele.
+DETAIL_MARKET_TITLES = re.compile(
+    r"^(1 n 2"
+    r"|double chance"
+    r"|les 2 equipes marqueront.*"
+    r"|resultat et les deux equipes marquent"
+    r"|double chance et les 2 equipes marquent)"
+    r" - 90 mins$"
+)
+# Doubles chances : la paire de signes, triee, donne le nom du marche.
+DOUBLE_CHANCE = {("1", "N"): "1N", ("1", "2"): "12", ("2", "N"): "N2"}
 
 # Suffixes et prefixes de club sans valeur discriminante. "City" et "United" en sont
 # volontairement absents : ils distinguent des clubs d'une meme ville.
@@ -91,7 +113,7 @@ def teams_match(left: str, right: str) -> bool:
 
 @dataclass
 class BookmakerOdds:
-    """Cotes 1X2 proposees par un bookmaker pour une rencontre."""
+    """Cotes proposees par un bookmaker pour une rencontre."""
 
     bookmaker: str
     home_team: str
@@ -99,10 +121,162 @@ class BookmakerOdds:
     odds: dict[str, float] = field(default_factory=dict)
     kickoff: str | None = None
     competition: str | None = None
+    url: str | None = None  # page detail, seule a exposer les marches combines
 
     @property
     def complete(self) -> bool:
         return all(self.odds.get(key) for key in ("1", "X", "2"))
+
+
+def deaccent(text: str) -> str:
+    """Minuscules sans accents, pour comparer des libelles francais."""
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+def slugify(text: str) -> str:
+    """Reproduit les URL d'Unibet : « D1 Lettonie » -> « d1-lettonie »."""
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", deaccent(text))).strip("-")
+
+
+def _sign_for(part: str, home: str, away: str) -> str | None:
+    """Traduit un morceau de libelle en signe 1, N ou 2."""
+    if part in DRAW_LABELS:
+        return "N"
+    if teams_match(part, home):
+        return "1"
+    if teams_match(part, away):
+        return "2"
+    return None
+
+
+def market_name(label: str, home: str, away: str) -> str | None:
+    """Nom de marche du modele correspondant a un libelle Unibet.
+
+    Les libelles melangent noms d'equipes, signes et suffixe « et Oui/Non » :
+    « Nul / 2 et Oui » devient « N2 et oui », « FK RFS / Non » devient « 2 et non ».
+    Retourne None pour les libelles sans equivalent dans le modele.
+    """
+    pieces = re.split(r"\s*/\s*|\s+et\s+", deaccent(label))
+    parts = [part.strip() for part in pieces if part.strip()]
+    if not parts:
+        return None
+
+    btts = None
+    if parts[-1] in YES_LABELS | NO_LABELS:
+        btts = "oui" if parts[-1] in YES_LABELS else "non"
+        parts = parts[:-1]
+
+    signs = [sign for part in parts if (sign := _sign_for(part, home, away))]
+    if len(signs) != len(parts):
+        return None
+
+    if not signs:
+        return f"Les deux marquent : {btts}" if btts else None
+    if len(signs) == 1:
+        base = signs[0]
+    elif len(signs) == 2:
+        base = DOUBLE_CHANCE.get(tuple(sorted(signs)))
+    else:
+        base = None
+
+    if not base:
+        return None
+    return f"{base} et {btts}" if btts else base
+
+
+def parse_event_markets(html: str, home: str, away: str) -> dict[str, float]:
+    """Lit les marches de la page detail d'une rencontre Unibet.
+
+    Chaque carte porte un titre (« Double chance et les 2 equipes marquent - 90 Mins »)
+    et des selections dont le libelle est soit un en-tete de ligne, soit un label dans
+    le bouton. Seules les cartes ayant un equivalent dans le modele sont lues.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    odds: dict[str, float] = {}
+
+    for card in soup.select("div.psel-market-card"):
+        title = card.select_one(".psel-title-market__label")
+        if not title or not DETAIL_MARKET_TITLES.match(deaccent(title.get_text(strip=True))):
+            continue
+
+        for outcome in card.select("psel-outcome"):
+            price = _price_text(outcome.select_one(".psel-outcome__data"))
+            if price is None:
+                continue
+            label = outcome.select_one(".psel-outcome__label")
+            if label is None:
+                row = outcome.find_parent("tr")
+                label = row.select_one("th") if row else None
+            if label is None:
+                continue
+            market = market_name(label.get_text(strip=True), home, away)
+            if market:
+                odds[market] = price
+    return odds
+
+
+def _price_text(node) -> float | None:
+    return _price(node.get_text(strip=True)) if node else None
+
+
+_session: requests.Session | None = None
+
+
+def _unibet_session(cfg: ScrapeConfig) -> requests.Session:
+    """Session ouverte sur la page football du site.
+
+    Appelee a froid, l'API repond « Missing X-LVS-HSToken » ; elle accepte les appels
+    une fois la page publique visitee, exactement comme le fait un navigateur.
+    """
+    global _session
+    if _session is not None:
+        return _session
+
+    session = requests.Session()
+    headers = dict(UNIBET_HEADERS)
+    headers["Accept"] = "text/html,application/xhtml+xml"
+    try:
+        session.get(f"{UNIBET_SITE}/paris-football", headers=headers, timeout=cfg.request_timeout)
+    except requests.RequestException as exc:
+        log.debug("Unibet : page d'accueil injoignable (%s)", exc)
+    _session = session
+    return session
+
+
+def _unibet_get(url: str, cfg: ScrapeConfig, *, html: bool = False) -> requests.Response | None:
+    """GET sur Unibet, avec une seconde tentative apres reouverture de la session."""
+    global _session
+    headers = dict(UNIBET_HEADERS)
+    if html:
+        headers["Accept"] = "text/html,application/xhtml+xml"
+
+    for attempt in (1, 2):
+        try:
+            response = _unibet_session(cfg).get(url, headers=headers, timeout=cfg.request_timeout)
+        except requests.RequestException as exc:
+            log.warning("Unibet injoignable : %s", exc)
+            return None
+        if response.status_code == 200:
+            return response
+        if response.status_code == 401 and attempt == 1:
+            _session = None  # session expiree : on en rouvre une
+            continue
+        log.warning("Unibet : HTTP %s sur %s (%s)", response.status_code, url, response.text[:120])
+        return None
+    return None
+
+
+def fetch_event_markets(entry: BookmakerOdds, cfg: ScrapeConfig) -> dict[str, float]:
+    """Recupere les marches combines d'une rencontre depuis sa page Unibet."""
+    if not entry.url:
+        return {}
+    response = _unibet_get(entry.url, cfg, html=True)
+    if response is None:
+        return {}
+    markets = parse_event_markets(response.text, entry.home_team, entry.away_team)
+    log.info("Unibet : %d marches lus pour %s", len(markets), entry.home_team)
+    return markets
 
 
 def fixture_matches(entry: BookmakerOdds, home_team: str, away_team: str) -> bool:
@@ -175,20 +349,34 @@ def _parse_unibet_page(payload: dict) -> list[BookmakerOdds]:
                     odds=odds,
                     kickoff=event.get("start"),
                     competition=event.get("pdesc"),
+                    url=_event_url(market.get("parent", ""), event),
                 )
             )
     return results
 
 
+def _event_url(event_key: str, event: dict) -> str | None:
+    """URL de la page detail, deduite du chemin et de l'identifiant de la rencontre.
+
+    Le listing ne fournit pas de lien : Unibet le compose a partir du pays, de la
+    competition, de l'identifiant numerique et du nom de la rencontre, par exemple
+    `/paris-football/lettonie/d1-lettonie/3360127/fk-tukums-2000-vs-fk-rfs`.
+    """
+    path = event.get("path") or {}
+    country, league, desc = path.get("Category"), path.get("League"), event.get("desc")
+    identifier = event_key.lstrip("e")
+    if not (country and league and desc and identifier.isdigit()):
+        return None
+    return (
+        f"{UNIBET_SITE}/paris-football/{slugify(country)}/{slugify(league)}"
+        f"/{identifier}/{slugify(desc)}"
+    )
+
+
 def fetch_unibet(cfg: ScrapeConfig) -> list[BookmakerOdds]:
     """Recupere les prochaines rencontres de football cotees chez Unibet France."""
-    response = requests.get(UNIBET_URL, headers=UNIBET_HEADERS, timeout=cfg.request_timeout)
-    if response.status_code != 200:
-        log.warning(
-            "Unibet : HTTP %s, cotes indisponibles (%s)",
-            response.status_code,
-            response.text[:120],
-        )
+    response = _unibet_get(UNIBET_URL, cfg)
+    if response is None:
         return []
     entries = _parse_unibet_page(response.json())
     log.info("Unibet : %d rencontres cotees", len(entries))

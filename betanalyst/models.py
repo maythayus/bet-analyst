@@ -158,9 +158,13 @@ class MatchBundle:
         """
         if not self.poisson or not self.poisson.markets:
             return []
-        found: list[tuple[str, float, float, float]] = []
+        prices: dict[str, float] = {}
         for sign, odds in self.best_odds().items():
             market = "N" if sign == "X" else sign  # le nul s'ecrit X chez les bookmakers
+            prices[market] = max(odds, prices.get(market, 0))
+
+        found: list[tuple[str, float, float, float]] = []
+        for market, odds in prices.items():
             probability = self.poisson.markets.get(market)
             if probability is None:
                 continue

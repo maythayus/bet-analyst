@@ -103,7 +103,14 @@ class TestCombinedMarkets(unittest.TestCase):
 
 UNIBET_PAGE = {
     "items": {
-        "e1": {"a": "Lyon", "b": "Rennes", "pdesc": "Ligue 1", "start": "2607252100"},
+        "e1": {
+            "a": "Lyon",
+            "b": "Rennes",
+            "pdesc": "Ligue 1",
+            "start": "2607252100",
+            "desc": "Lyon vs Stade Rennais",
+            "path": {"Category": "France", "League": "Ligue 1"},
+        },
         "m9": {"parent": "e1", "style": "WIN_DRAW_WIN", "desc": "1 N 2"},
         "o1": {"parent": "m9", "desc": "Lyon", "price": "1,80", "pos": 1},
         "o2": {"parent": "m9", "desc": "N", "price": "3,60", "pos": 2},
@@ -130,6 +137,92 @@ class TestBookmakers(unittest.TestCase):
         entries = bookmakers._parse_unibet_page(UNIBET_PAGE)
         self.assertIsNotNone(bookmakers.find(entries, "Lyon", "Stade Rennais"))
         self.assertIsNone(bookmakers.find(entries, "Lyon", "Monaco"))
+
+    def test_builds_the_detail_page_url(self) -> None:
+        (entry,) = bookmakers._parse_unibet_page(UNIBET_PAGE)
+        self.assertEqual(
+            entry.url,
+            "https://www.unibet.fr/paris-football/france/ligue-1/1/lyon-vs-stade-rennais",
+        )
+
+
+def _card(title: str, rows: list[tuple[str, str]], *, labelled: bool = False) -> str:
+    """Reproduit une carte de marche de la page detail Unibet."""
+    cells = []
+    for label, price in rows:
+        button = f'<button><span class="psel-outcome__data">{price}</span></button>'
+        if labelled:
+            button = (
+                f'<button><span class="psel-outcome__label">{label}</span>'
+                f'<span class="psel-outcome__data">{price}</span></button>'
+            )
+            cells.append(f"<td><psel-outcome>{button}</psel-outcome></td>")
+        else:
+            cells.append(
+                f'<tr><th class="psel-market__head">{label}</th>'
+                f"<td><psel-outcome>{button}</psel-outcome></td></tr>"
+            )
+    body = f"<tr>{''.join(cells)}</tr>" if labelled else "".join(cells)
+    return (
+        '<div class="psel-market-card">'
+        f'<span class="psel-title-market__label">{title}</span>'
+        f"<table><tbody>{body}</tbody></table></div>"
+    )
+
+
+UNIBET_DETAIL = "".join(
+    [
+        _card(
+            "Double Chance - 90 Mins",
+            [("Lyon / N", "1,30"), ("N / Rennes", "1,55"), ("Lyon / Rennes", "1,25")],
+            labelled=True,
+        ),
+        _card("Les 2 \u00e9quipes marqueront-elles? - 90 Mins", [("Oui", "1,80"), ("Non", "1,95")]),
+        _card(
+            "R\u00e9sultat et les deux \u00e9quipes marquent - 90 Mins",
+            [("Lyon / Oui", "3,05"), ("N / Oui", "5,40"), ("Rennes / Non", "8,20")],
+        ),
+        _card(
+            "Double chance et les 2 \u00e9quipes marquent - 90 Mins",
+            [("Lyon / N et Oui", "2,10"), ("N / Rennes et Non", "4,80")],
+        ),
+        # Marche sans equivalent dans le modele : doit etre ignore.
+        _card("R\u00e9sultat et Plus/Moins Buts - 90 Mins", [("Lyon et plus 1,5", "1,90")]),
+        # Mi-temps : le modele ne calcule que le temps reglementaire.
+        _card("Les 2 \u00e9quipes marqueront elles ? - 1\u00e8re Mi-Temps", [("Oui", "3,40")]),
+    ]
+)
+
+
+class TestDetailedMarkets(unittest.TestCase):
+    def setUp(self) -> None:
+        self.odds = bookmakers.parse_event_markets(UNIBET_DETAIL, "Lyon", "Rennes")
+
+    def test_reads_both_teams_to_score(self) -> None:
+        self.assertEqual(self.odds["Les deux marquent : oui"], 1.80)
+        self.assertEqual(self.odds["Les deux marquent : non"], 1.95)
+
+    def test_reads_double_chance(self) -> None:
+        self.assertEqual(self.odds["1N"], 1.30)
+        self.assertEqual(self.odds["N2"], 1.55)
+        self.assertEqual(self.odds["12"], 1.25)
+
+    def test_reads_combined_markets(self) -> None:
+        self.assertEqual(self.odds["1 et oui"], 3.05)
+        self.assertEqual(self.odds["N et oui"], 5.40)
+        self.assertEqual(self.odds["2 et non"], 8.20)
+        self.assertEqual(self.odds["1N et oui"], 2.10)
+        self.assertEqual(self.odds["N2 et non"], 4.80)
+
+    def test_ignores_markets_absent_from_the_model(self) -> None:
+        self.assertNotIn("1 et plus 1,5", self.odds)
+        self.assertEqual(len(self.odds), 10)
+
+    def test_every_market_read_exists_in_the_model(self) -> None:
+        stats = demo.stats_for("Olympique Lyonnais", "Stade Rennais")
+        known = poisson.compute(stats).markets
+        for market in self.odds:
+            self.assertIn(market, known)
 
 
 class TestOddsFiltering(unittest.TestCase):
