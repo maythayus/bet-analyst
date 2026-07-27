@@ -24,6 +24,7 @@ class Leg:
     market: str
     probability: float  # en %
     odds: float | None = None
+    kickoff: str | None = None
 
     @property
     def fair_odds(self) -> float:
@@ -73,6 +74,15 @@ class Ticket:
         probability = self.probability
         return round(100 / probability) if probability else 0
 
+    @property
+    def deadline(self) -> str | None:
+        """Coup d'envoi du premier match : le ticket doit etre valide avant.
+
+        Un combine se joue en une fois ; des que la premiere rencontre demarre, il
+        n'est plus pariable tel quel.
+        """
+        return min((leg.kickoff for leg in self.legs if leg.kickoff), default=None)
+
     def payout(self, stake: float) -> float | None:
         odds = self.odds
         return round(stake * odds, 2) if odds else None
@@ -91,10 +101,10 @@ def _best_selection(bundle: MatchBundle, market: str | None) -> Leg | None:
         probability = candidates.get(market)
         if probability is None:
             return None
-        return Leg(bundle.label, market, probability, prices.get(market))
+        return Leg(bundle.label, market, probability, prices.get(market), bundle.stats.kickoff)
 
     name, probability = max(candidates.items(), key=lambda item: item[1])
-    return Leg(bundle.label, name, probability, prices.get(name))
+    return Leg(bundle.label, name, probability, prices.get(name), bundle.stats.kickoff)
 
 
 def build_ticket(
@@ -118,9 +128,13 @@ def build_ticket(
         return None
 
     ticket = Ticket(selections[: max(legs, 1)])
-    if min_probability is None:
-        return ticket
+    if min_probability is not None:
+        while ticket.legs and ticket.probability < min_probability:
+            ticket = Ticket(ticket.legs[:-1])
+        if len(ticket.legs) < 2:
+            return None
 
-    while ticket.legs and ticket.probability < min_probability:
-        ticket = Ticket(ticket.legs[:-1])
-    return ticket if len(ticket.legs) >= 2 else None
+    # Les selections sont choisies par probabilite, puis affichees dans l'ordre des
+    # coups d'envoi : c'est ainsi qu'on les suit, et le premier donne l'heure limite.
+    ticket.legs.sort(key=lambda leg: (leg.kickoff is None, leg.kickoff or ""))
+    return ticket

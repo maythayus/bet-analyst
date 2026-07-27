@@ -13,6 +13,10 @@ from betanalyst.pipeline import run
 from betanalyst.report import build_markdown, write_report
 from betanalyst.sources.http import FetchError
 
+# Avec --today, la journee entiere est analysee : ce plafond n'existe que pour eviter
+# une boucle sans fin si Unibet renvoyait un listing aberrant.
+ALL_MATCHES = 500
+
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -88,6 +92,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Forebet : les cotes sont alors garanties, mais sans pronostic Forebet",
     )
     parser.add_argument(
+        "--today",
+        action="store_true",
+        help="toutes les rencontres du jour cotees chez Unibet, et non les 50 prochaines "
+        "(sans --matches, elles sont toutes analysees : comptez plusieurs minutes)",
+    )
+    parser.add_argument(
         "--no-detailed-odds",
         action="store_true",
         help="ne pas ouvrir la page Unibet de chaque rencontre retenue "
@@ -141,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = AppConfig()
     if args.matches:
         cfg.scrape.max_matches = args.matches
+    elif args.today:
+        cfg.scrape.max_matches = ALL_MATCHES
     if args.model:
         cfg.lmstudio.model = args.model
     if args.base_url:
@@ -167,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
             odds_range=tuple(args.odds_range) if args.odds_range else None,
             detailed_odds=not args.no_detailed_odds,
             from_bookmakers=args.from_unibet,
+            today_only=args.today,
         )
     except FetchError as exc:
         print(f"Collecte impossible : {exc}", file=sys.stderr)
@@ -197,10 +210,11 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
         else:
+            deadline = f", a valider avant {ticket.deadline}" if ticket.deadline else ""
             print(
                 f"\nTicket {len(ticket.legs)} selections : "
                 f"{ticket.probability:.2f} % de chances (1 fois sur {ticket.one_in}), "
-                f"cote minimale a exiger {ticket.fair_odds:.2f}"
+                f"cote minimale a exiger {ticket.fair_odds:.2f}{deadline}"
             )
 
     markdown_path, json_path = write_report(pairs, cfg.output_dir, ticket)

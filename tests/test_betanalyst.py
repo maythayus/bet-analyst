@@ -145,6 +145,10 @@ class TestBookmakers(unittest.TestCase):
         self.assertEqual(prediction.competition, "Ligue 1")
         self.assertIsNone(prediction.best_probability)
 
+    def test_reads_the_kickoff_time(self) -> None:
+        (entry,) = bookmakers._parse_unibet_page(UNIBET_PAGE)
+        self.assertEqual(entry.kickoff, "2026-07-25 21:00")
+
     def test_builds_the_detail_page_url(self) -> None:
         (entry,) = bookmakers._parse_unibet_page(UNIBET_PAGE)
         self.assertEqual(
@@ -341,6 +345,17 @@ class TestCombo(unittest.TestCase):
         ticket = build_ticket(self.bundles, legs=2, market="Les deux marquent : oui")
         assert ticket is not None
         self.assertTrue(all(leg.market == "Les deux marquent : oui" for leg in ticket.legs))
+
+    def test_legs_are_ordered_by_kickoff(self) -> None:
+        ticket = build_ticket(self.bundles, legs=2)
+        assert ticket is not None
+        kickoffs = [leg.kickoff for leg in ticket.legs]
+        self.assertEqual(kickoffs, sorted(kickoffs))
+
+    def test_deadline_is_the_first_kickoff(self) -> None:
+        ticket = build_ticket(self.bundles, legs=2)
+        assert ticket is not None
+        self.assertEqual(ticket.deadline, "2026-07-26 19:00")
 
     def test_unreachable_threshold_returns_no_ticket(self) -> None:
         self.assertIsNone(build_ticket(self.bundles, legs=2, min_probability=99.9))

@@ -15,8 +15,10 @@ from __future__ import annotations
 import csv
 import logging
 import re
+import time
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -27,12 +29,15 @@ from betanalyst.config import USER_AGENT, ScrapeConfig
 
 log = logging.getLogger(__name__)
 
-# Endpoint public utilise par le site Unibet France : les 50 prochaines rencontres de
-# football (p240). Les autres tailles de page renvoient 404, il n'y a pas de pagination.
+# Endpoint public utilise par le site Unibet France : les rencontres de football (p240)
+# par pages de 50, dans l'ordre des coups d'envoi. Les autres tailles de page renvoient
+# 404 ; seul `pageIndex` permet d'avancer dans le calendrier.
 UNIBET_URL = (
     "https://www.unibet.fr/lvs-api/next/50/p240"
-    "?lineId=1&originId=3&breakdownEventsIntoDays=true&showPromotions=true&pageIndex=0"
+    "?lineId=1&originId=3&breakdownEventsIntoDays=true&showPromotions=true&pageIndex={page}"
 )
+# Au-dela, on sort largement de la journee en cours meme un jour de grosse affiche.
+UNIBET_MAX_PAGES = 12
 # L'API refuse les appels sans Referer/Origin du site (reponse 'Missing X-LVS-HSToken').
 UNIBET_HEADERS = {
     "User-Agent": USER_AGENT,
@@ -251,7 +256,7 @@ def _unibet_get(url: str, cfg: ScrapeConfig, *, html: bool = False) -> requests.
     if html:
         headers["Accept"] = "text/html,application/xhtml+xml"
 
-    for attempt in (1, 2):
+    for attempt in (1, 2, 3):
         try:
             response = _unibet_session(cfg).get(url, headers=headers, timeout=cfg.request_timeout)
         except requests.RequestException as exc:
@@ -259,8 +264,9 @@ def _unibet_get(url: str, cfg: ScrapeConfig, *, html: bool = False) -> requests.
             return None
         if response.status_code == 200:
             return response
-        if response.status_code == 401 and attempt == 1:
-            _session = None  # session expiree : on en rouvre une
+        if response.status_code == 401 and attempt < 3:
+            _session = None  # session expiree ou refusee : on en rouvre une
+            time.sleep(attempt)
             continue
         log.warning("Unibet : HTTP %s sur %s (%s)", response.status_code, url, response.text[:120])
         return None
@@ -347,12 +353,22 @@ def _parse_unibet_page(payload: dict) -> list[BookmakerOdds]:
                     home_team=home,
                     away_team=away,
                     odds=odds,
-                    kickoff=event.get("start"),
+                    kickoff=parse_kickoff(event.get("start")),
                     competition=event.get("pdesc"),
                     url=_event_url(market.get("parent", ""), event),
                 )
             )
     return results
+
+
+def parse_kickoff(raw: str | None) -> str | None:
+    """Convertit l'horaire du listing (`2607271500`) en `2026-07-27 15:00`."""
+    if not raw or len(raw) != 10 or not raw.isdigit():
+        return raw or None
+    try:
+        return datetime.strptime(raw, "%y%m%d%H%M").strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return raw
 
 
 def _event_url(event_key: str, event: dict) -> str | None:
@@ -373,13 +389,39 @@ def _event_url(event_key: str, event: dict) -> str | None:
     )
 
 
-def fetch_unibet(cfg: ScrapeConfig) -> list[BookmakerOdds]:
-    """Recupere les prochaines rencontres de football cotees chez Unibet France."""
-    response = _unibet_get(UNIBET_URL, cfg)
-    if response is None:
-        return []
-    entries = _parse_unibet_page(response.json())
-    log.info("Unibet : %d rencontres cotees", len(entries))
+def kickoff_day(kickoff: str | None) -> str | None:
+    """Jour du coup d'envoi (`AAAA-MM-JJ`) d'un horaire deja normalise."""
+    return kickoff[:10] if kickoff else None
+
+
+def fetch_unibet(cfg: ScrapeConfig, *, today_only: bool = False) -> list[BookmakerOdds]:
+    """Recupere les rencontres de football cotees chez Unibet France.
+
+    Par defaut, la premiere page suffit (les 50 prochains coups d'envoi). Avec
+    `today_only`, les pages sont enchainees tant qu'elles contiennent des rencontres du
+    jour, puis les rencontres des jours suivants sont ecartees.
+    """
+    day = datetime.now().strftime("%Y-%m-%d")
+    entries: list[BookmakerOdds] = []
+    for page in range(UNIBET_MAX_PAGES if today_only else 1):
+        response = _unibet_get(UNIBET_URL.format(page=page), cfg)
+        if response is None:
+            break
+        found = _parse_unibet_page(response.json())
+        if not found:
+            break
+        if today_only:
+            kept = [entry for entry in found if kickoff_day(entry.kickoff) == day]
+            entries.extend(kept)
+            if len(kept) < len(found):  # la page deborde sur les jours suivants
+                break
+        else:
+            entries.extend(found)
+
+    if today_only:
+        log.info("Unibet : %d rencontres cotees aujourd'hui", len(entries))
+    else:
+        log.info("Unibet : %d rencontres cotees", len(entries))
     return entries
 
 

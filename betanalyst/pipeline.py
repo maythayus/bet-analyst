@@ -48,11 +48,13 @@ def _collect_stats(
     )
 
 
-def collect_odds(cfg: AppConfig, *, odds_csv: Path | None = None) -> list[BookmakerOdds]:
+def collect_odds(
+    cfg: AppConfig, *, odds_csv: Path | None = None, today_only: bool = False
+) -> list[BookmakerOdds]:
     """Cotes Unibet (API publique) completees par un fichier manuel (ParionsSport)."""
     entries: list[BookmakerOdds] = []
     try:
-        entries.extend(bookmakers.fetch_unibet(cfg.scrape))
+        entries.extend(bookmakers.fetch_unibet(cfg.scrape, today_only=today_only))
     except (OSError, ValueError) as exc:
         log.warning("Cotes Unibet indisponibles : %s", exc)
     if odds_csv:
@@ -238,8 +240,13 @@ def run(
     odds_range: tuple[float, float] | None = None,
     detailed_odds: bool = True,
     from_bookmakers: bool = False,
+    today_only: bool = False,
 ) -> list[tuple[MatchBundle, Analysis | None]]:
-    odds = collect_odds(cfg, odds_csv=odds_csv) if use_bookmakers and not offline else []
+    odds = (
+        collect_odds(cfg, odds_csv=odds_csv, today_only=today_only)
+        if use_bookmakers and not offline
+        else []
+    )
 
     if matches:
         predictions = [parse_match_argument(text) for text in matches]

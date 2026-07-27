@@ -139,7 +139,15 @@ analyse.cmd --matches 20 --odds-range 1.65 1.95 --print    tes propres options
 
 En ligne de commande, `--print` affiche le rapport en plus de l'écrire dans `out/`.
 
+Par défaut, seuls les 50 prochains coups d'envoi sont récupérés. `--today` enchaîne les
+pages du listing pour couvrir **toutes les rencontres de la journée** ; sans `--matches`,
+elles sont toutes analysées (compte plusieurs minutes, Flashscore ouvre deux pages par
+match).
+
 ```powershell
+# toute la journée, en partant des cotes
+python -m betanalyst --from-unibet --today --combo 4 --combo-market "Les deux marquent : oui"
+
 # analyser directement les prochaines rencontres cotées chez Unibet
 python -m betanalyst --from-unibet --matches 10 --combo 4 --combo-market "Les deux marquent : oui"
 
@@ -167,7 +175,10 @@ python -m betanalyst --matches 5 --no-bookmakers
 
 `--combo N` place en tête du rapport un ticket construit avec les N sélections les
 plus probables (une par match), sa probabilité de passer et la **cote minimale à
-exiger** pour que le pari ait une espérance positive. `--min-combo-prob PCT` retire les
+exiger** pour que le pari ait une espérance positive. Les sélections y sont affichées
+**du coup d'envoi le plus tôt au plus tard**, et le rapport indique l'**heure limite du
+pari** : celle du premier match, au-delà de laquelle le combiné n'est plus jouable.
+`--min-combo-prob PCT` retire les
 sélections les moins probables jusqu'à ce que le ticket atteigne le seuil demandé, et
 n'affiche rien si même deux sélections n'y suffisent pas.
 
@@ -207,15 +218,30 @@ marquent » oui/non, et les combinés `1N et oui`, `12 et oui`, `N2 et oui`, `1N
 Le rapport affiche pour chacun la **cote équitable** (celle en dessous de laquelle le
 pari perd de l'argent si le modèle a raison) et la compare à la cote proposée.
 
-### Si Forebet renvoie un contrôle anti-bot
+### Forebet : enregistrer la page à la main (Ctrl+S)
 
 Forebet est derrière Cloudflare, qui bloque aussi bien la requête HTTP directe que
-Chromium piloté par Playwright. **La méthode qui fonctionne** est d'enregistrer la page
-depuis ton navigateur habituel (Ctrl+S, « Page Web, complète ») puis :
+Chromium piloté par Playwright. **La seule méthode qui fonctionne** est d'enregistrer la
+page depuis ton navigateur, chaque jour :
+
+1. Ouvre <https://www.forebet.com/en/football-tips-and-predictions-for-today> dans ton
+   navigateur habituel (Firefox ou Chrome).
+2. **Ctrl+S**, type « Page Web, complète » (ou « HTML seul », les deux marchent).
+3. **Renomme le fichier `Forebet.htm`** et place-le **à la racine du projet**, à côté de
+   `analyse.cmd`. Le fichier téléchargé s'appelle par défaut
+   `Football Predictions for Today _ Forebet.htm` : renommé, il est repris
+   automatiquement, sans avoir à taper de chemin.
+4. Lance `analyse.cmd` : il affiche « Forebet.htm trouve » et croise les pronostics avec
+   les cotes Unibet du jour.
+
+À refaire chaque jour : le fichier de la veille ne contient plus les matchs du jour, et
+plus aucun d'eux n'est alors pariable.
+
+Si tu préfères le garder ailleurs, indique son chemin (guillemets obligatoires s'il
+contient des espaces) :
 
 ```powershell
-# guillemets obligatoires : le nom du fichier contient des espaces
-python -m betanalyst --forebet-html "C:\Users\<toi>\Desktop\Football Predictions for Today _ Forebet.htm"
+python -m betanalyst --forebet-html "C:\Users\<toi>\Desktop\Football Predictions for Today _ Forebet.htm" --today --only-bettable
 ```
 
 Sinon, on se passe complètement de Forebet (Flashscore + Poisson + LLM) :

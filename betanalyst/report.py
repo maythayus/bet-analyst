@@ -167,15 +167,23 @@ def _selection_block(bundles: list[MatchBundle]) -> str:
 
 def _ticket_block(ticket: Ticket, stake: float = 10.0) -> str:
     rows = [
-        "| Match | Marche | Proba modele | Cote equitable | Cote dispo |",
-        "| --- | --- | --- | --- | --- |",
+        "| Coup d'envoi | Match | Marche | Proba modele | Cote equitable | Cote dispo |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for leg in ticket.legs:
         odds = f"{leg.odds:.2f}" if leg.odds else "-"
         rows.append(
-            f"| {leg.match} | {leg.market} | {leg.probability:.1f} % | "
+            f"| {leg.kickoff or '?'} | {leg.match} | {leg.market} | {leg.probability:.1f} % | "
             f"{leg.fair_odds:.2f} | {odds} |"
         )
+
+    deadline = ticket.deadline
+    if deadline:
+        rows += [
+            "",
+            f"**Pari a valider avant {deadline}**, coup d'envoi du premier match : "
+            "passe cette heure, le combine n'est plus jouable tel quel.",
+        ]
 
     rows += [
         "",
