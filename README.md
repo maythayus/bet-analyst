@@ -68,6 +68,18 @@ dans les 50 prochains coups d'envoi d'Unibet et le filtrage ne garde rien. `--fr
 inverse alors la source : les matchs viennent des cotes, donc ils sont pariables par
 construction (sans pronostic Forebet, le modèle de Poisson et Flashscore suffisent).
 
+### Lancement en un clic
+
+`analyse.cmd`, à la racine du projet, active le venv s'il existe, lance l'analyse des
+prochaines rencontres cotées et **affiche le rapport dans la console** :
+
+```text
+analyse.cmd                                   analyse par défaut, ticket de 4 « les deux marquent »
+analyse.cmd --matches 20 --odds-range 1.65 1.95 --print    tes propres options
+```
+
+En ligne de commande, `--print` affiche le rapport en plus de l'écrire dans `out/`.
+
 ```powershell
 # analyser directement les prochaines rencontres cotées chez Unibet
 python -m betanalyst --from-unibet --matches 10 --combo 4 --combo-market "Les deux marquent : oui"

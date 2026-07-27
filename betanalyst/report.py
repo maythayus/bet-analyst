@@ -197,8 +197,8 @@ def _ticket_block(ticket: Ticket, stake: float = 10.0) -> str:
     else:
         rows.append(
             "_Cote du combine non calculable : au moins une selection n'est pas cotee "
-            "automatiquement (Unibet ne publie que le 1 N 2)."
-            " Saisis les cotes manquantes via `--odds-csv`._"
+            "chez Unibet (match hors des 50 prochaines rencontres, ou marche absent). "
+            "Saisis les cotes manquantes via `--odds-csv`._"
         )
 
     rows += [

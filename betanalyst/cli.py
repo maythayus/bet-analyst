@@ -10,7 +10,7 @@ from pathlib import Path
 from betanalyst.combo import build_ticket
 from betanalyst.config import AppConfig
 from betanalyst.pipeline import run
-from betanalyst.report import write_report
+from betanalyst.report import build_markdown, write_report
 from betanalyst.sources.http import FetchError
 
 
@@ -115,12 +115,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="probabilite minimale que le ticket passe ; les selections les moins "
         "probables sont retirees jusqu'a atteindre ce seuil, ex. 25",
     )
+    parser.add_argument(
+        "--print",
+        dest="print_report",
+        action="store_true",
+        help="afficher le rapport dans la console en plus de l'ecrire dans out/",
+    )
     parser.add_argument("--demo", action="store_true", help="donnees fictives, aucun acces reseau")
     parser.add_argument("--verbose", "-v", action="store_true", help="logs detailles")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    # La console Windows est en cp1252 : sans cela, les accents du rapport la font planter.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     args = _parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -193,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     markdown_path, json_path = write_report(pairs, cfg.output_dir, ticket)
+    if args.print_report:
+        print()
+        print(build_markdown(pairs, ticket))
     print(f"\nRapport  : {markdown_path}")
     print(f"Donnees  : {json_path}")
     return 0
