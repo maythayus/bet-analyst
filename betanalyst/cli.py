@@ -7,6 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
+from betanalyst.combo import build_ticket
 from betanalyst.config import AppConfig
 from betanalyst.pipeline import run
 from betanalyst.report import write_report
@@ -80,6 +81,28 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="ne garder que les matchs offrant une cote dans cette fourchette, "
         "ex. --odds-range 1.65 1.95 ; les matchs sont tries par valeur decroissante",
     )
+    parser.add_argument(
+        "--combo",
+        type=int,
+        default=None,
+        metavar="N",
+        help="construire un ticket combine avec les N selections les plus probables",
+    )
+    parser.add_argument(
+        "--combo-market",
+        default=None,
+        metavar="MARCHE",
+        help="imposer le meme marche a toutes les selections, "
+        "ex. --combo-market \"Les deux marquent : oui\"",
+    )
+    parser.add_argument(
+        "--min-combo-prob",
+        type=float,
+        default=None,
+        metavar="PCT",
+        help="probabilite minimale que le ticket passe ; les selections les moins "
+        "probables sont retirees jusqu'a atteindre ce seuil, ex. 25",
+    )
     parser.add_argument("--demo", action="store_true", help="donnees fictives, aucun acces reseau")
     parser.add_argument("--verbose", "-v", action="store_true", help="logs detailles")
     return parser.parse_args(argv)
@@ -134,7 +157,28 @@ def main(argv: list[str] | None = None) -> int:
         print("Aucun match analyse.", file=sys.stderr)
         return 1
 
-    markdown_path, json_path = write_report(pairs, cfg.output_dir)
+    ticket = None
+    if args.combo or args.min_combo_prob:
+        ticket = build_ticket(
+            [bundle for bundle, _ in pairs],
+            legs=args.combo or 4,
+            market=args.combo_market,
+            min_probability=args.min_combo_prob,
+        )
+        if ticket is None:
+            print(
+                "Aucun ticket ne depasse la probabilite demandee : meme reduit a deux "
+                "selections, le combine reste en dessous du seuil.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"\nTicket {len(ticket.legs)} selections : "
+                f"{ticket.probability:.2f} % de chances (1 fois sur {ticket.one_in}), "
+                f"cote minimale a exiger {ticket.fair_odds:.2f}"
+            )
+
+    markdown_path, json_path = write_report(pairs, cfg.output_dir, ticket)
     print(f"\nRapport  : {markdown_path}")
     print(f"Donnees  : {json_path}")
     return 0

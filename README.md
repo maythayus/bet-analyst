@@ -67,9 +67,26 @@ python -m betanalyst --matches 20 --only-bettable --min-prob 95 --min-odds 1.5
 # uniquement les matchs offrant une cote entre 1.65 et 1.95, tries par valeur
 python -m betanalyst --matches 20 --only-bettable --odds-range 1.65 1.95
 
+# ticket combine de 4 "les deux marquent", les plus probables du jour
+python -m betanalyst --matches 20 --combo 4 --combo-market "Les deux marquent : oui"
+
+# ... et seulement s'il a au moins 25 % de chances de passer
+python -m betanalyst --matches 20 --combo 4 --min-combo-prob 25
+
 # sans les cotes
 python -m betanalyst --matches 5 --no-bookmakers
 ```
+
+`--combo N` place en tête du rapport un ticket construit avec les N sélections les
+plus probables (une par match), sa probabilité de passer et la **cote minimale à
+exiger** pour que le pari ait une espérance positive. `--min-combo-prob PCT` retire les
+sélections les moins probables jusqu'à ce que le ticket atteigne le seuil demandé, et
+n'affiche rien si même deux sélections n'y suffisent pas.
+
+Exemple réel à 4 sélections : 83.9 % × 74.5 % × 74.2 % × 52.3 % = **24 %**, soit une fois
+sur quatre, et une cote minimale de 4.12. Avec `--min-combo-prob 40`, le ticket est
+ramené à 3 sélections : 46 % et cote minimale 2.16. C'est le compromis à connaître —
+chaque sélection ajoutée gonfle le gain affiché et divise la chance de le toucher.
 
 Avec `--odds-range`, le rapport s'ouvre sur une section **Sélection** : un tableau
 récapitulatif donnant, pour chaque match, le marché coté le plus intéressant, sa cote,

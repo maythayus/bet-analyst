@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betanalyst import demo, poisson
+from betanalyst.combo import build_ticket
 from betanalyst.config import AppConfig
 from betanalyst.models import BookmakerLine, ForebetPrediction, MatchBundle
 from betanalyst.pipeline import build_bundles, filter_predictions
@@ -213,6 +214,36 @@ class TestOpportunities(unittest.TestCase):
     def test_range_excludes_prices_outside_the_window(self) -> None:
         markets = {item[0] for item in self._bundle().opportunities((1.65, 1.95))}
         self.assertEqual(markets, {"1"})
+
+
+class TestCombo(unittest.TestCase):
+    def setUp(self) -> None:
+        self.bundles = build_bundles(demo.predictions(), AppConfig(), offline=True)
+
+    def test_ticket_probability_is_the_product_of_its_legs(self) -> None:
+        ticket = build_ticket(self.bundles, legs=2)
+        assert ticket is not None
+        expected = ticket.legs[0].probability * ticket.legs[1].probability / 100
+        self.assertAlmostEqual(ticket.probability, expected, places=1)
+
+    def test_adding_a_leg_lowers_the_probability(self) -> None:
+        two = build_ticket(self.bundles, legs=1)
+        three = build_ticket(self.bundles, legs=2)
+        assert two is not None and three is not None
+        self.assertLess(three.probability, two.probability)
+
+    def test_fair_odds_is_the_inverse_of_the_probability(self) -> None:
+        ticket = build_ticket(self.bundles, legs=2)
+        assert ticket is not None
+        self.assertAlmostEqual(ticket.fair_odds, 100 / ticket.probability, places=1)
+
+    def test_market_option_forces_every_leg(self) -> None:
+        ticket = build_ticket(self.bundles, legs=2, market="Les deux marquent : oui")
+        assert ticket is not None
+        self.assertTrue(all(leg.market == "Les deux marquent : oui" for leg in ticket.legs))
+
+    def test_unreachable_threshold_returns_no_ticket(self) -> None:
+        self.assertIsNone(build_ticket(self.bundles, legs=2, min_probability=99.9))
 
 
 class TestPipelineOffline(unittest.TestCase):

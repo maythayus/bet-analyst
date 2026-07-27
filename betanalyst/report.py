@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from betanalyst.combo import Ticket
 from betanalyst.models import Analysis, MatchBundle, implied_from_odds
 
 DISCLAIMER = (
@@ -161,9 +162,68 @@ def _selection_block(bundles: list[MatchBundle]) -> str:
     return "\n".join(rows)
 
 
-def build_markdown(pairs: list[tuple[MatchBundle, Analysis | None]]) -> str:
+def _ticket_block(ticket: Ticket, stake: float = 10.0) -> str:
+    rows = [
+        "| Match | Marche | Proba modele | Cote equitable | Cote dispo |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for leg in ticket.legs:
+        odds = f"{leg.odds:.2f}" if leg.odds else "-"
+        rows.append(
+            f"| {leg.match} | {leg.market} | {leg.probability:.1f} % | "
+            f"{leg.fair_odds:.2f} | {odds} |"
+        )
+
+    rows += [
+        "",
+        f"**Probabilite que le ticket passe : {ticket.probability:.2f} %** "
+        f"(environ une fois sur {ticket.one_in}).",
+        "",
+        f"Cote minimale a exiger pour que le pari ait un sens : **{ticket.fair_odds:.2f}**.",
+    ]
+
+    odds = ticket.odds
+    rows.append("")
+    if odds:
+        payout = ticket.payout(stake)
+        rows.append(
+            f"Cote reellement disponible : **{odds:.2f}** "
+            f"({stake:.0f} EUR rapportent {payout:.2f} EUR)."
+        )
+        value = ticket.value
+        if value is not None:
+            verdict = "esperance positive" if value > 0 else "esperance negative"
+            rows.append(f"Valeur : **{value:+.1f} %** ({verdict} si le modele a raison).")
+    else:
+        rows.append(
+            "_Cote du combine non calculable : au moins une selection n'est pas cotee "
+            "automatiquement (Unibet ne publie que le 1 N 2)."
+            " Saisis les cotes manquantes via `--odds-csv`._"
+        )
+
+    rows += [
+        "",
+        "_Chaque selection ajoutee multiplie la probabilite par un nombre inferieur a 1 : "
+        "le gain affiche grossit, la chance de le toucher s'effondre. Le calcul suppose "
+        "de plus les matchs independants, ce qu'ils ne sont jamais totalement._",
+    ]
+    return "\n".join(rows)
+
+
+def build_markdown(
+    pairs: list[tuple[MatchBundle, Analysis | None]], ticket: Ticket | None = None
+) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     parts = [f"# Rapport d'analyse - {now}", "", DISCLAIMER, ""]
+
+    if ticket and ticket.legs:
+        parts += [
+            f"## Ticket combine ({len(ticket.legs)} selections)",
+            _ticket_block(ticket),
+            "",
+            "---",
+            "",
+        ]
 
     selection = _selection_block([bundle for bundle, _ in pairs])
     if selection:
@@ -191,14 +251,16 @@ def build_markdown(pairs: list[tuple[MatchBundle, Analysis | None]]) -> str:
 
 
 def write_report(
-    pairs: list[tuple[MatchBundle, Analysis | None]], output_dir: Path
+    pairs: list[tuple[MatchBundle, Analysis | None]],
+    output_dir: Path,
+    ticket: Ticket | None = None,
 ) -> tuple[Path, Path]:
     """Ecrit le rapport Markdown et le JSON brut. Retourne les deux chemins."""
     output_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     markdown_path = output_dir / f"rapport-{stamp}.md"
-    markdown_path.write_text(build_markdown(pairs), encoding="utf-8")
+    markdown_path.write_text(build_markdown(pairs, ticket), encoding="utf-8")
 
     json_path = output_dir / f"donnees-{stamp}.json"
     json_path.write_text(
