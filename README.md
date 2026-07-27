@@ -72,14 +72,52 @@ mise, gagnante ou perdante. Aucun logiciel ne supprime cette marge.
 > Aucun modèle, statistique ou LLM, ne prédit un résultat sportif de manière fiable.
 > Cet outil est une aide à la décision, pas un oracle. Joue de façon responsable.
 
+## Prérequis
+
+| Élément | Version | À quoi ça sert |
+| --- | --- | --- |
+| **Python** | 3.10 ou plus (testé en 3.13) | fait tourner l'outil |
+| **Git** | — | récupérer le projet et ses mises à jour (`git pull`) |
+| **Chromium** (via Playwright) | installé par `playwright install chromium` | lire les statistiques Flashscore |
+| **LM Studio** | facultatif | l'analyse rédigée par le LLM local ; sans lui, le rapport est généré quand même, mais sans commentaire |
+| **Un navigateur** | Firefox ou Chrome | enregistrer la page Forebet avec Ctrl+S |
+
+Les dépendances Python, listées dans `requirements.txt` :
+
+| Paquet | Version minimale | Rôle |
+| --- | --- | --- |
+| `requests` | 2.32.0 | requêtes HTTP : Forebet, API Unibet, LM Studio |
+| `beautifulsoup4` | 4.12.3 | lecture du HTML : Forebet, pages de match Unibet |
+| `playwright` | 1.45.0 | navigateur piloté, pour Flashscore |
+
+Rien d'autre n'est nécessaire : le modèle de Poisson et les calculs de cotes n'utilisent
+que la bibliothèque standard (pas de numpy ni de pandas).
+
 ## Installation (Windows, RTX 5070)
 
 ```powershell
+git clone https://github.com/maythayus/bet-analyst.git
 cd bet-analyst
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 playwright install chromium   # nécessaire uniquement pour Flashscore
+```
+
+Vérifie que tout est en place, sans réseau ni LLM :
+
+```powershell
+python -m betanalyst --demo --no-llm
+```
+
+Le venv doit être réactivé (`.\.venv\Scripts\Activate.ps1`) à chaque nouvelle fenêtre
+PowerShell — sinon Python ne trouve pas Playwright. `analyse.cmd` s'en charge tout seul.
+
+Pour mettre à jour :
+
+```powershell
+git pull
+pip install -r requirements.txt   # au cas où une dépendance aurait été ajoutée
 ```
 
 ## Côté LM Studio
