@@ -60,6 +60,33 @@ def collect_odds(cfg: AppConfig, *, odds_csv: Path | None = None) -> list[Bookma
     return entries
 
 
+def predictions_from_odds(entries: list[BookmakerOdds], limit: int) -> list[ForebetPrediction]:
+    """Rencontres a analyser deduites des grilles bookmakers, sans passer par Forebet.
+
+    Utile quand la page Forebet enregistree ne recoupe pas la fenetre couverte par le
+    bookmaker : les matchs viennent alors des cotes, donc ils sont pariables par
+    construction. Aucune probabilite Forebet n'est disponible dans ce mode.
+    """
+    predictions: list[ForebetPrediction] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in entries:
+        key = (bookmakers.normalise(entry.home_team), bookmakers.normalise(entry.away_team))
+        if key in seen:
+            continue
+        seen.add(key)
+        predictions.append(
+            ForebetPrediction(
+                home_team=entry.home_team,
+                away_team=entry.away_team,
+                kickoff=entry.kickoff,
+                competition=entry.competition,
+            )
+        )
+        if len(predictions) >= limit:
+            break
+    return predictions
+
+
 def enrich_with_detailed_markets(
     predictions: list[ForebetPrediction], entries: list[BookmakerOdds], cfg: AppConfig
 ) -> None:
@@ -210,22 +237,25 @@ def run(
     min_odds: float | None = None,
     odds_range: tuple[float, float] | None = None,
     detailed_odds: bool = True,
+    from_bookmakers: bool = False,
 ) -> list[tuple[MatchBundle, Analysis | None]]:
+    odds = collect_odds(cfg, odds_csv=odds_csv) if use_bookmakers and not offline else []
+
     if matches:
         predictions = [parse_match_argument(text) for text in matches]
     elif offline:
         predictions = demo.predictions()
+    elif from_bookmakers:
+        predictions = predictions_from_odds(odds, cfg.scrape.max_matches)
+        log.info("%d rencontres cotees a analyser", len(predictions))
     else:
         predictions = forebet.fetch_predictions(
             cfg.scrape, use_cache=use_cache, html_file=forebet_html
         )
     if not predictions:
-        log.warning("Aucune prediction Forebet recuperee (structure du site modifiee ?)")
+        log.warning("Aucune rencontre a analyser (source vide ou structure modifiee ?)")
         return []
 
-    odds = (
-        collect_odds(cfg, odds_csv=odds_csv) if use_bookmakers and not offline else []
-    )
     if odds:
         before = len(predictions)
         predictions = filter_predictions(

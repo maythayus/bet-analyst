@@ -12,7 +12,7 @@ from betanalyst import demo, poisson
 from betanalyst.combo import build_ticket
 from betanalyst.config import AppConfig
 from betanalyst.models import BookmakerLine, ForebetPrediction, MatchBundle
-from betanalyst.pipeline import build_bundles, filter_predictions
+from betanalyst.pipeline import build_bundles, filter_predictions, predictions_from_odds
 from betanalyst.report import build_markdown
 from betanalyst.sources import bookmakers
 from betanalyst.sources.forebet import parse_predictions
@@ -137,6 +137,13 @@ class TestBookmakers(unittest.TestCase):
         entries = bookmakers._parse_unibet_page(UNIBET_PAGE)
         self.assertIsNotNone(bookmakers.find(entries, "Lyon", "Stade Rennais"))
         self.assertIsNone(bookmakers.find(entries, "Lyon", "Monaco"))
+
+    def test_builds_predictions_from_the_odds_grid(self) -> None:
+        entries = bookmakers._parse_unibet_page(UNIBET_PAGE)
+        (prediction,) = predictions_from_odds(entries + entries, limit=10)
+        self.assertEqual((prediction.home_team, prediction.away_team), ("Lyon", "Rennes"))
+        self.assertEqual(prediction.competition, "Ligue 1")
+        self.assertIsNone(prediction.best_probability)
 
     def test_builds_the_detail_page_url(self) -> None:
         (entry,) = bookmakers._parse_unibet_page(UNIBET_PAGE)

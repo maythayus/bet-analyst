@@ -63,7 +63,15 @@ marquent** (oui / non), les **doubles chances** et leurs **combinaisons** (`1N e
 `N2 et non`…). C'est une requête par match, d'où `--no-detailed-odds` si tu veux aller
 plus vite sans ces marchés.
 
+Si la page Forebet enregistrée date d'un autre jour, aucun de ses matchs ne figure plus
+dans les 50 prochains coups d'envoi d'Unibet et le filtrage ne garde rien. `--from-unibet`
+inverse alors la source : les matchs viennent des cotes, donc ils sont pariables par
+construction (sans pronostic Forebet, le modèle de Poisson et Flashscore suffisent).
+
 ```powershell
+# analyser directement les prochaines rencontres cotées chez Unibet
+python -m betanalyst --from-unibet --matches 10 --combo 4 --combo-market "Les deux marquent : oui"
+
 # ne garder que les matchs cotés chez un bookmaker
 python -m betanalyst --matches 20 --only-bettable
 

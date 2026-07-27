@@ -82,6 +82,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "ex. --odds-range 1.65 1.95 ; les matchs sont tries par valeur decroissante",
     )
     parser.add_argument(
+        "--from-unibet",
+        action="store_true",
+        help="analyser les prochaines rencontres cotees chez Unibet au lieu de la liste "
+        "Forebet : les cotes sont alors garanties, mais sans pronostic Forebet",
+    )
+    parser.add_argument(
         "--no-detailed-odds",
         action="store_true",
         help="ne pas ouvrir la page Unibet de chaque rencontre retenue "
@@ -149,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             min_odds=args.min_odds,
             odds_range=tuple(args.odds_range) if args.odds_range else None,
             detailed_odds=not args.no_detailed_odds,
+            from_bookmakers=args.from_unibet,
         )
     except FetchError as exc:
         print(f"Collecte impossible : {exc}", file=sys.stderr)
