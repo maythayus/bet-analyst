@@ -10,6 +10,65 @@ Unibet (cotes réelles)    ┘
 
 Rien ne sort de ta machine : le LLM tourne dans LM Studio, sur le GPU.
 
+## Ce que fait l'outil, et ce qu'il ne fait pas
+
+Il **croise quatre sources** pour chaque rencontre pariable :
+
+1. **Forebet** — les probabilités publiées par un site de pronostics, prises comme un
+   avis extérieur, pas comme une vérité.
+2. **Flashscore** — les statistiques brutes : cinq derniers matchs de chaque équipe,
+   buts marqués et encaissés, confrontations directes.
+3. **Modèle de Poisson** — un calcul maison, indépendant des deux précédents, qui
+   déduit de ces statistiques la probabilité de chaque marché.
+4. **Unibet** — les cotes réellement proposées : 1 N 2 du listing, puis « les deux
+   équipes marquent », doubles chances et combinés lus sur la page de chaque match.
+
+Le tout est ensuite résumé par un **LLM local** (par défaut
+`deepseek-r1-distill-llama-8b` dans LM Studio ; `--model` pour en changer), dont le rôle
+est de commenter les désaccords entre sources — pas d'inventer un pronostic.
+
+Sont analysés **tous les matchs pariables**, c'est-à-dire ceux pour lesquels une cote
+Unibet existe (`--only-bettable`, ou `--from-unibet` pour partir directement de la
+grille des cotes).
+
+### Ce que ça ne prouve pas
+
+Une sélection affichée n'est **jamais une validation ni une certitude** : c'est un
+pronostic, issu de sites de prédiction et d'un modèle statistique qui se trompent tous
+les deux régulièrement.
+
+- Une probabilité de 80 % veut dire que l'issue **ne se produit pas une fois sur cinq** ;
+  se tromper n'est pas une anomalie, c'est prévu par le calcul.
+- Une « valeur » positive ne signifie rien en soi : elle suppose que mon modèle, bâti
+  sur cinq matchs de forme, soit mieux calibré qu'Unibet, qui dispose de bien plus de
+  données. C'est rarement le cas.
+- Le modèle ignore l'essentiel de ce qui décide un match : blessures, suspensions,
+  turnover, météo, enjeu, motivation, arbitrage.
+- Les probabilités d'un ticket combiné supposent les matchs **indépendants**, ce qu'ils
+  ne sont jamais totalement : la probabilité réelle est plus basse que celle affichée.
+- Les cotes bougent en permanence : celles du rapport valent pour l'instant où il a été
+  généré.
+
+### Risques du jeu
+
+Le pari sportif est un jeu d'argent, et un jeu d'argent **est conçu pour être perdant
+à long terme** : la marge du bookmaker (5 à 8 % sur le 1 N 2) est prélevée sur chaque
+mise, gagnante ou perdante. Aucun logiciel ne supprime cette marge.
+
+- Ne mise **que ce que tu peux perdre entièrement**, jamais un argent nécessaire (loyer,
+  factures, crédit), jamais de l'argent emprunté.
+- Ne cherche jamais à « se refaire » après une perte : c'est le mécanisme qui transforme
+  une mauvaise soirée en dette.
+- Même avec un vrai avantage, la variance impose des séries de dix pertes d'affilée.
+  Une mise unitaire au-delà de 1 à 2 % de ta bankroll finit par tout emporter.
+- Les tickets gagnants montrés sur les réseaux sociaux sont une sélection d'images : les
+  perdants ne sont pas publiés, et beaucoup de ces comptes vendent un abonnement.
+- Le jeu peut devenir une addiction. Si tu joues plus que prévu, si tu caches tes mises,
+  si tu y penses en permanence : **09 74 75 13 13** (Joueurs Info Service, appel non
+  surtaxé, 8h-2h) ou [joueurs-info-service.fr](https://www.joueurs-info-service.fr/).
+- Interdiction volontaire de jeux possible auprès de l'ANJ : [anj.fr](https://anj.fr/).
+- Jeu interdit aux mineurs.
+
 > Aucun modèle, statistique ou LLM, ne prédit un résultat sportif de manière fiable.
 > Cet outil est une aide à la décision, pas un oracle. Joue de façon responsable.
 

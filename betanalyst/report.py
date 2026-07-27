@@ -10,9 +10,12 @@ from betanalyst.combo import Ticket
 from betanalyst.models import Analysis, MatchBundle, implied_from_odds
 
 DISCLAIMER = (
-    "> Rapport genere automatiquement. Aucun modele, statistique ou LLM, ne predit "
-    "un resultat sportif de maniere fiable. A utiliser comme aide a la decision "
-    "uniquement, jamais comme garantie. Jouez de maniere responsable."
+    "> Rapport genere automatiquement a partir de Forebet, Flashscore, d'un modele de "
+    "Poisson et des cotes Unibet. Ce sont des **pronostics**, jamais une validation : "
+    "aucun modele, statistique ou LLM, ne predit un resultat sportif de maniere fiable. "
+    "Le pari sportif est un jeu d'argent, perdant a long terme du fait de la marge du "
+    "bookmaker. Ne mise que ce que tu peux perdre. Aide : 09 74 75 13 13 "
+    "(Joueurs Info Service). Interdit aux mineurs."
 )
 
 
