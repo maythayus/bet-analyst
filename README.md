@@ -15,7 +15,7 @@ Rien ne sort de ta machine : le LLM tourne dans LM Studio, sur le GPU.
 Il **croise quatre sources** pour chaque rencontre pariable :
 
 1. **Forebet** — les probabilités publiées par un site de pronostics, prises comme un
-   avis extérieur, pas comme une vérité.
+   avis extérieur, pas comme une vérité. URLS pour le fichiers Forebet.htm = https://www.forebet.com/en/football-tips-and-predictions-for-today/predictions-both-to-score
 2. **Flashscore** — les statistiques brutes : cinq derniers matchs de chaque équipe,
    buts marqués et encaissés, confrontations directes.
 3. **Modèle de Poisson** — un calcul maison, indépendant des deux précédents, qui
