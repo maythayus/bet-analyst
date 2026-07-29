@@ -65,6 +65,8 @@ _ALIASES = {
         "Seville FC": "Sevilla",
         "Milan AC": "AC Milan",
         "Neftci PFK": "Neftci Baku",
+        # Maxline a quitte Rogachev pour Vitebsk : Flashscore a suivre, pas le bookmaker.
+        "Max.Rogachev": "ML Vitebsk",
         "FK DAC 1904": "DAC Dunajska Streda",
     }.items()
 }
