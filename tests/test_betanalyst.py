@@ -5,12 +5,13 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betanalyst import demo, poisson
 from betanalyst.combo import build_ticket
-from betanalyst.config import AppConfig
+from betanalyst.config import AppConfig, ScrapeConfig
 from betanalyst.models import BookmakerLine, ForebetPrediction, MatchBundle
 from betanalyst.pipeline import build_bundles, filter_predictions, predictions_from_odds
 from betanalyst.report import build_markdown
@@ -400,6 +401,25 @@ class TestFlashscoreSearch(unittest.TestCase):
     def test_an_unrelated_name_stays_below_the_threshold(self) -> None:
         score = flashscore.score_candidate("Dunav Rousse", "Monticello (France)")
         self.assertLess(score, flashscore.NAME_THRESHOLD)
+
+    def test_falls_back_to_the_namesake_whose_page_has_matches(self) -> None:
+        empty = flashscore.Team("1", "vitoria-amateur", "Vitoria (Brazil)")
+        played = flashscore.Team("2", "vitoria", "Vitoria (Brazil)")
+        results = {played: [flashscore.PastMatch("01.01.", "Vitoria", "Bahia", 1, 0)]}
+        with mock.patch.object(
+            flashscore, "fetch_team_results", lambda team, cfg: results.get(team, [])
+        ):
+            team, matches = flashscore.team_with_results([empty, played], ScrapeConfig())
+        self.assertEqual(team, played)
+        self.assertEqual(len(matches), 1)
+
+    def test_reports_when_no_namesake_has_matches(self) -> None:
+        team = flashscore.Team("1", "vitoria-amateur", "Vitoria (Brazil)")
+        with (
+            mock.patch.object(flashscore, "fetch_team_results", lambda team, cfg: []),
+            self.assertRaises(flashscore.FlashscoreUnavailable),
+        ):
+            flashscore.team_with_results([team], ScrapeConfig())
 
 
 class TestPipelineOffline(unittest.TestCase):

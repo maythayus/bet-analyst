@@ -225,8 +225,9 @@ Les noms d'équipes du bookmaker sont abrégés (« Mac.Tel Aviv », « SherifTi
 équipes féminines, les réserves et les U19, et se sert du pays de la compétition pour
 départager les homonymes (le Libertad d'Équateur et celui du Paraguay). Quand le nom
 retenu diffère de celui du bookmaker, la ligne `Flashscore : 'X' identifie comme Y` le
-signale ; si aucun candidat ne convient, le match est analysé sans statistiques et un
-avertissement le dit.
+signale. Quand la page du club retenu n'affiche aucun match joué (homonyme amateur, club
+inactif), les candidats suivants sont essayés avant d'abandonner ; si aucun ne convient,
+le match est analysé sans statistiques et un avertissement le dit.
 
 ```powershell
 # toute la journée, en partant des cotes

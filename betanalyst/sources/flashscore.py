@@ -44,6 +44,8 @@ NAME_THRESHOLD = 0.6
 OTHER_SQUAD_PENALTY = 0.3
 WORD_COUNT_PENALTY = 0.05
 COUNTRY_BONUS = 0.25
+# Nombre d'homonymes gardes en reserve quand la page du premier n'affiche aucun match.
+CANDIDATE_LIMIT = 3
 
 # Flashscore nomme les pays en anglais, les bookmakers francais en francais. La table ne
 # couvre que les pays dont les noms different assez pour ne pas se ressembler tels quels
@@ -191,14 +193,15 @@ def score_candidate(name: str, title: str, country: str | None = None) -> float:
     return score + bonus - WORD_COUNT_PENALTY * extra
 
 
-def find_team(name: str, cfg: ScrapeConfig, *, country: str | None = None) -> Team | None:
-    """Retrouve l'equipe de football correspondant le mieux au nom fourni.
+def find_candidates(name: str, cfg: ScrapeConfig, *, country: str | None = None) -> list[Team]:
+    """Equipes de football plausibles pour un nom, de la plus proche a la plus lointaine.
 
     Le premier resultat renvoye par Flashscore n'est pas toujours le bon : une recherche
     sur « Libertad Loja » propose d'abord le Libertad d'Asuncion. Les candidats sont donc
-    notes, et le nom retenu est journalise pour qu'un mauvais appariement se voie.
+    notes, et plusieurs sont conserves : une page d'equipe homonyme peut n'afficher aucun
+    match, auquel cas le suivant sert de repli.
     """
-    best: tuple[float, Team] | None = None
+    scored: dict[str, tuple[float, Team]] = {}
     for query in query_variants(name):
         try:
             results = _search(query, cfg)
@@ -216,20 +219,27 @@ def find_team(name: str, cfg: ScrapeConfig, *, country: str | None = None) -> Te
                 continue
             title = str(item.get("title", name))
             score = score_candidate(name, title, country)
-            if best is None or score > best[0]:
-                best = (score, Team(str(identifier), str(slug), title))
+            scored[str(identifier)] = (score, Team(str(identifier), str(slug), title))
 
-        if best and best[0] >= NAME_THRESHOLD:
+        if any(score >= NAME_THRESHOLD for score, _ in scored.values()):
             break
 
-    if best is None or best[0] < NAME_THRESHOLD:
-        found = f" (meilleur candidat : {best[1].title})" if best else ""
+    ranked = sorted(scored.values(), key=lambda entry: entry[0], reverse=True)
+    kept = [team for score, team in ranked if score >= NAME_THRESHOLD]
+    if not kept:
+        found = f" (meilleur candidat : {ranked[0][1].title})" if ranked else ""
         log.warning("Flashscore : '%s' introuvable%s", name, found)
-        return None
+        return []
 
-    if best[0] < 1.0:
-        log.info("Flashscore : '%s' identifie comme %s", name, best[1].title)
-    return best[1]
+    if ranked[0][0] < 1.0:
+        log.info("Flashscore : '%s' identifie comme %s", name, kept[0].title)
+    return kept[:CANDIDATE_LIMIT]
+
+
+def find_team(name: str, cfg: ScrapeConfig, *, country: str | None = None) -> Team | None:
+    """Meilleure equipe correspondant au nom fourni, ou None si aucune ne convient."""
+    candidates = find_candidates(name, cfg, country=country)
+    return candidates[0] if candidates else None
 
 
 def _parse_results_page(page: Any, limit: int) -> list[PastMatch]:
@@ -292,6 +302,28 @@ def fetch_team_results(team: Team, cfg: ScrapeConfig, *, limit: int = 10) -> lis
             browser.close()
 
 
+def team_with_results(
+    candidates: list[Team], cfg: ScrapeConfig
+) -> tuple[Team, list[PastMatch]]:
+    """Premier homonyme dont la page affiche vraiment des matchs joues.
+
+    « Vitoria BA » trouve d'abord un club amateur dont la page est vide : sans repli, le
+    match serait analyse sans statistiques alors que le bon club existe.
+    """
+    last: FlashscoreUnavailable | None = None
+    for team in candidates:
+        try:
+            matches = fetch_team_results(team, cfg)
+        except FlashscoreUnavailable as exc:
+            log.info("Flashscore : %s sans resultats affiches, essai du suivant", team.title)
+            last = exc
+            continue
+        if matches:
+            return team, matches
+        last = FlashscoreUnavailable(f"Aucun match joue pour {team.title}")
+    raise last or FlashscoreUnavailable("Aucun candidat exploitable sur Flashscore")
+
+
 def build_form(team_name: str, matches: list[PastMatch], *, sample: int = 5) -> TeamForm:
     """Convertit une liste de matchs en forme recente (du point de vue de l'equipe)."""
     form = TeamForm(name=team_name)
@@ -321,18 +353,22 @@ def fetch_match_stats(
 ) -> MatchStats:
     """Assemble forme des deux equipes + confrontations directes."""
     country = country_hint(competition)
-    home = find_team(home_team, cfg, country=country)
-    away = find_team(away_team, cfg, country=country)
-    missing = [name for name, team in ((home_team, home), (away_team, away)) if not team]
-    if missing or not (home and away):
+    home_choices = find_candidates(home_team, cfg, country=country)
+    away_choices = find_candidates(away_team, cfg, country=country)
+    missing = [
+        name
+        for name, choices in ((home_team, home_choices), (away_team, away_choices))
+        if not choices
+    ]
+    if missing:
         raise FlashscoreUnavailable(
             f"Equipe introuvable sur Flashscore : {', '.join(missing)}. "
             "Le nom vient du bookmaker et peut etre tronque ; utilise --match "
             f'"{home_team} vs {away_team}" avec les noms complets pour forcer la recherche.'
         )
 
-    home_matches = fetch_team_results(home, cfg)
-    away_matches = fetch_team_results(away, cfg)
+    home, home_matches = team_with_results(home_choices, cfg)
+    away, away_matches = team_with_results(away_choices, cfg)
 
     return MatchStats(
         home_team=home_team,
