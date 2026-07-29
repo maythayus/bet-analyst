@@ -1,4 +1,4 @@
-﻿"""Collecte des predictions mathematiques de Forebet.
+"""Collecte des predictions mathematiques de Forebet.
 
 Le HTML de Forebet change regulierement : le parsing est volontairement
 defensif (plusieurs selecteurs testes, valeurs manquantes tolerees).

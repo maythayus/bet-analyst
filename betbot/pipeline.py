@@ -1,4 +1,4 @@
-﻿"""Orchestration : Forebet -> Flashscore -> Poisson -> LM Studio -> rapport."""
+"""Orchestration : Forebet -> Flashscore -> Poisson -> LM Studio -> rapport."""
 
 from __future__ import annotations
 

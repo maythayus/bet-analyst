@@ -1,4 +1,4 @@
-﻿"""Construction d'un ticket combine a partir des probabilites du modele.
+"""Construction d'un ticket combine a partir des probabilites du modele.
 
 Les selections retenues sont les plus probables du jour, une par match. La
 probabilite d'un combine est le produit des probabilites de ses selections : elle

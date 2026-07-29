@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 rem Lanceur double-cliquable : analyse toutes les rencontres du jour cotees chez Unibet
 rem et affiche le rapport dans la console.
 rem
@@ -19,6 +19,15 @@ if exist ".venv\Scripts\python.exe" (
     set "PYTHON=.venv\Scripts\python.exe"
 ) else (
     set "PYTHON=python"
+)
+
+rem Un venv fraichement cree n'a aucune dependance : le dire au lieu d'une pile d'erreurs.
+"%PYTHON%" -c "import requests, bs4" 2>nul
+if errorlevel 1 (
+    echo Dependances manquantes. Lance une fois :
+    echo     %PYTHON% -m pip install -r requirements.txt
+    echo     %PYTHON% -m playwright install chromium
+    goto :fin
 )
 
 if not "%~1"=="" (

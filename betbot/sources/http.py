@@ -1,4 +1,4 @@
-﻿"""Utilitaire HTTP avec cache disque et repli navigateur (anti-403)."""
+"""Utilitaire HTTP avec cache disque et repli navigateur (anti-403)."""
 
 from __future__ import annotations
 

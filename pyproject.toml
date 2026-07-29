@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "betbot"
 version = "0.1.0"
 description = "Analyse de paris sportifs : Forebet + Flashscore + Poisson + LLM local (LM Studio)"

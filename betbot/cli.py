@@ -1,4 +1,4 @@
-﻿"""Point d'entree en ligne de commande : `python -m betbot`."""
+"""Point d'entree en ligne de commande : `python -m betbot`."""
 
 from __future__ import annotations
 

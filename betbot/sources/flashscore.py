@@ -1,4 +1,4 @@
-﻿"""Collecte des statistiques brutes sur Flashscore.
+"""Collecte des statistiques brutes sur Flashscore.
 
 Deux etapes :
 1. `s.flashscore.com/search` (JSON leger) pour retrouver l'identifiant de chaque equipe ;

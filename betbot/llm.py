@@ -1,4 +1,4 @@
-﻿"""Client LM Studio (API locale compatible OpenAI) et prompts d'analyse."""
+"""Client LM Studio (API locale compatible OpenAI) et prompts d'analyse."""
 
 from __future__ import annotations
 

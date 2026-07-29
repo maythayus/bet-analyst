@@ -1,4 +1,4 @@
-﻿"""Tests hors ligne : `python -m unittest discover -s tests`."""
+"""Tests hors ligne : `python -m unittest discover -s tests`."""
 
 from __future__ import annotations
 

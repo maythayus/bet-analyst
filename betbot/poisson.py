@@ -1,4 +1,4 @@
-﻿"""Modele de Poisson bivarie simplifie : contre-expertise chiffree du LLM.
+"""Modele de Poisson bivarie simplifie : contre-expertise chiffree du LLM.
 
 On estime les buts attendus de chaque equipe a partir de sa moyenne offensive et
 de la faiblesse defensive adverse, puis on convole les deux lois de Poisson pour

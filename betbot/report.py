@@ -1,4 +1,4 @@
-﻿"""Generation du rapport Markdown."""
+"""Generation du rapport Markdown."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-﻿"""Jeu de donnees fictif pour tester le pipeline sans reseau (`--demo`)."""
+"""Jeu de donnees fictif pour tester le pipeline sans reseau (`--demo`)."""
 
 from __future__ import annotations
 
