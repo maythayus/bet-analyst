@@ -46,6 +46,37 @@ WORD_COUNT_PENALTY = 0.05
 COUNTRY_BONUS = 0.25
 # Nombre d'homonymes gardes en reserve quand la page du premier n'affiche aucun match.
 CANDIDATE_LIMIT = 3
+# Longueur maximale d'un mot considere comme une abreviation (« Dyn. » pour Dynamo).
+ABBREVIATION_WORD = 4
+
+# Clubs que les grilles francaises nomment autrement que Flashscore : ni troncature ni
+# accent ne permet de les rapprocher, seule une table les relie.
+_ALIASES = {
+    normalise(french): international
+    for french, international in {
+        "La Gantoise": "Gent",
+        "The New Saints": "TNS",
+        "Etoile Rouge Belgrade": "Crvena zvezda",
+        "FC Copenhague": "Copenhagen",
+        "Bale": "Basel",
+        "Cologne": "Koln",
+        "Naples": "Napoli",
+        "La Corogne": "Deportivo La Coruna",
+        "Seville FC": "Sevilla",
+        "Milan AC": "AC Milan",
+        "Neftci PFK": "Neftci Baku",
+        "FK DAC 1904": "DAC Dunajska Streda",
+    }.items()
+}
+
+# Transcriptions concurrentes d'un meme nom slave, d'un bookmaker a l'autre.
+_SPELLINGS = {
+    "dynamo": "dinamo",
+    "dinamo": "dynamo",
+    "kiev": "kyiv",
+    "kyiv": "kiev",
+    "salonique": "thessaloniki",
+}
 
 # Flashscore nomme les pays en anglais, les bookmakers francais en francais. La table ne
 # couvre que les pays dont les noms different assez pour ne pas se ressembler tels quels
@@ -140,15 +171,27 @@ def _spaced(name: str) -> str:
     return " ".join(_GLUED.sub(" ", name.replace(".", " ").replace("-", " ")).split())
 
 
+def alias(name: str) -> str | None:
+    """Nom international d'un club que le bookmaker francise ou reduit a un sigle."""
+    return _ALIASES.get(normalise(name))
+
+
+def _respelled(name: str) -> str:
+    """Nom avec l'autre transcription usuelle (« Dynamo Kiev » -> « Dinamo Kyiv »)."""
+    words = [_SPELLINGS.get(word.lower(), word) for word in _spaced(name).split()]
+    return " ".join(words)
+
+
 def query_variants(name: str) -> list[str]:
     """Formes successives a essayer dans la recherche Flashscore.
 
-    Les bookmakers tronquent et collent les noms (« Mac.Tel Aviv », « SherifTiraspol ») :
-    on repart donc du nom brut, puis d'une version aeree, puis du mot le plus long, qui
-    est presque toujours le nom de la ville ou du club.
+    Les bookmakers tronquent et collent les noms (« Mac.Tel Aviv », « SherifTiraspol »),
+    les francisent (« La Gantoise ») ou les transcrivent autrement (« Dynamo Kiev ») :
+    on essaie l'alias connu, le nom brut, une version aeree, l'autre transcription, puis
+    le mot le plus long, presque toujours le nom de la ville ou du club.
     """
     spaced = _spaced(name)
-    variants = [name, spaced]
+    variants = [alias(name) or "", name, spaced, _respelled(name)]
     words = [word for word in re.split(r"\W+", spaced) if len(word) > 3]
     if words:
         variants.append(max(words, key=len))
@@ -171,6 +214,28 @@ def country_hint(competition: str | None) -> str | None:
     return text
 
 
+def _expanded(wanted: str, plain: str) -> tuple[str, str]:
+    """Deux libelles ou chaque abreviation est remplacee par le mot complet d'en face.
+
+    « Dyn. Kyiv » devient « Dynamo Kyiv » face a « Dynamo Kiev » : sans cela, un mot sur
+    deux concorde et le bon club passe sous le seuil.
+    """
+
+    def grow(short: str, reference: str) -> str:
+        words = reference.split()
+        grown = []
+        for word in short.split():
+            longer = [other for other in words if len(other) > len(word) and _starts(other, word)]
+            grown.append(longer[0] if len(word) <= ABBREVIATION_WORD and len(longer) == 1 else word)
+        return " ".join(grown)
+
+    return grow(wanted, plain), grow(plain, wanted)
+
+
+def _starts(word: str, prefix: str) -> bool:
+    return normalise(word).startswith(normalise(prefix)) and bool(normalise(prefix))
+
+
 def score_candidate(name: str, title: str, country: str | None = None) -> float:
     """Ressemblance entre le nom cherche et un resultat de recherche.
 
@@ -183,8 +248,11 @@ def score_candidate(name: str, title: str, country: str | None = None) -> float:
     found = _COUNTRY.search(title)
     origin = normalise(found.group(0)) if found else ""
     bonus = COUNTRY_BONUS if origin and country and origin in country else 0.0
-    wanted = _spaced(name)
-    score = similarity(wanted, plain)
+    wanted = _spaced(alias(name) or name)
+    score = max(
+        similarity(*_expanded(wanted, plain)),
+        similarity(*_expanded(_respelled(wanted), plain)),
+    )
     if _OTHER_SQUAD.search(plain.lower()) and not _OTHER_SQUAD.search(wanted.lower()):
         score -= OTHER_SQUAD_PENALTY
     # A ressemblance egale, le nom comptant le meme nombre de mots l'emporte :

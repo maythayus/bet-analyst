@@ -72,7 +72,12 @@ DOUBLE_CHANCE = {("1", "N"): "1N", ("1", "2"): "12", ("2", "N"): "N2"}
 
 # Suffixes et prefixes de club sans valeur discriminante. "City" et "United" en sont
 # volontairement absents : ils distinguent des clubs d'une meme ville.
-_NOISE = re.compile(r"\b(fc|cf|sc|ac|as|ss|us|sv|if|fk|sk|nk|hk|bk|afc|cd|ud|rc|rcd|club)\b")
+_NOISE = re.compile(
+    r"\b(fc|cf|sc|ac|as|ss|us|sv|if|fk|sk|nk|hk|bk|afc|cd|ud|rc|rcd|club"
+    r"|pfk|pfc|ofk|mfk|msk|bsc|vfb|vfl|fsv|tsv|tsg|ssc)\b"
+)
+# Annee de fondation accolee au nom : « FK DAC 1904 » et « DAC Dunajska Streda ».
+_FOUNDED = re.compile(r"\b(1[89]|20)\d{2}\b")
 TOKEN_THRESHOLD = 0.75
 ABBREVIATION_LENGTH = 2
 PREFIX_LENGTH = 4
@@ -83,6 +88,7 @@ def normalise(name: str) -> str:
     text = unicodedata.normalize("NFKD", name.lower())
     text = "".join(char for char in text if not unicodedata.combining(char))
     text = re.sub(r"[^a-z0-9 ]+", " ", text)
+    text = _FOUNDED.sub(" ", text)
     text = _NOISE.sub(" ", text)
     return " ".join(text.split())
 

@@ -398,6 +398,26 @@ class TestFlashscoreSearch(unittest.TestCase):
         self.assertEqual(flashscore.country_hint("D1 Paraguay"), "d1 paraguay")
         self.assertIsNone(flashscore.country_hint(None))
 
+    def test_matches_dotted_abbreviations_and_other_spellings(self) -> None:
+        self.assertGreaterEqual(
+            flashscore.score_candidate("Dynamo Kiev", "Dyn. Kyiv (Ukraine)"),
+            flashscore.NAME_THRESHOLD,
+        )
+        self.assertGreaterEqual(
+            flashscore.score_candidate("FK DAC 1904", "DAC Dunajska Streda (Slovakia)"),
+            flashscore.NAME_THRESHOLD,
+        )
+        self.assertGreater(
+            flashscore.score_candidate("Dynamo Minsk", "Dinamo Minsk (Belarus)"),
+            flashscore.score_candidate("Dynamo Minsk", "FC Minsk (Belarus)"),
+        )
+
+    def test_translates_the_french_club_names(self) -> None:
+        self.assertEqual(flashscore.alias("La Gantoise"), "Gent")
+        self.assertIn("Gent", flashscore.query_variants("La Gantoise"))
+        self.assertIn("dinamo kyiv", flashscore.query_variants("Dynamo Kiev"))
+        self.assertIsNone(flashscore.alias("Lyon"))
+
     def test_an_unrelated_name_stays_below_the_threshold(self) -> None:
         score = flashscore.score_candidate("Dunav Rousse", "Monticello (France)")
         self.assertLess(score, flashscore.NAME_THRESHOLD)
