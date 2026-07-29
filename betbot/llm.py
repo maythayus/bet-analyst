@@ -1,4 +1,4 @@
-"""Client LM Studio (API locale compatible OpenAI) et prompts d'analyse."""
+﻿"""Client LM Studio (API locale compatible OpenAI) et prompts d'analyse."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import re
 
 import requests
 
-from betanalyst.config import LMStudioConfig
-from betanalyst.models import Analysis, MatchBundle
+from betbot.config import LMStudioConfig
+from betbot.models import Analysis, MatchBundle
 
 log = logging.getLogger(__name__)
 

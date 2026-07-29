@@ -1,4 +1,4 @@
-"""Tests hors ligne : `python -m unittest discover -s tests`."""
+﻿"""Tests hors ligne : `python -m unittest discover -s tests`."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from betanalyst import demo, poisson
-from betanalyst.combo import build_ticket
-from betanalyst.config import AppConfig, ScrapeConfig
-from betanalyst.models import BookmakerLine, ForebetPrediction, MatchBundle
-from betanalyst.pipeline import build_bundles, filter_predictions, predictions_from_odds
-from betanalyst.report import build_markdown
-from betanalyst.sources import bookmakers, flashscore
-from betanalyst.sources.forebet import parse_predictions
+from betbot import demo, poisson
+from betbot.combo import build_ticket
+from betbot.config import AppConfig, ScrapeConfig
+from betbot.models import BookmakerLine, ForebetPrediction, MatchBundle
+from betbot.pipeline import build_bundles, filter_predictions, predictions_from_odds
+from betbot.report import build_markdown
+from betbot.sources import bookmakers, flashscore
+from betbot.sources.forebet import parse_predictions
 
 SAMPLE_HTML = """
 <div class="rcnt">

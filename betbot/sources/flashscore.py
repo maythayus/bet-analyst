@@ -1,4 +1,4 @@
-"""Collecte des statistiques brutes sur Flashscore.
+﻿"""Collecte des statistiques brutes sur Flashscore.
 
 Deux etapes :
 1. `s.flashscore.com/search` (JSON leger) pour retrouver l'identifiant de chaque equipe ;
@@ -21,9 +21,9 @@ from typing import Any
 
 import requests
 
-from betanalyst.config import USER_AGENT, ScrapeConfig
-from betanalyst.models import MatchStats, TeamForm
-from betanalyst.sources.bookmakers import normalise, similarity
+from betbot.config import USER_AGENT, ScrapeConfig
+from betbot.models import MatchStats, TeamForm
+from betbot.sources.bookmakers import normalise, similarity
 
 log = logging.getLogger(__name__)
 

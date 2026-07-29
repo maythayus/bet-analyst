@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 rem Lanceur double-cliquable : analyse toutes les rencontres du jour cotees chez Unibet
 rem et affiche le rapport dans la console.
 rem
@@ -22,17 +22,17 @@ if exist ".venv\Scripts\python.exe" (
 )
 
 if not "%~1"=="" (
-    "%PYTHON%" -m betanalyst %*
+    "%PYTHON%" -m betbot %*
     goto :fin
 )
 
 if exist "Forebet.htm" (
     echo Forebet.htm trouve : pronostics Forebet + cotes Unibet du jour.
-    "%PYTHON%" -m betanalyst --forebet-html "Forebet.htm" --today --only-bettable --combo 4 --combo-market "Les deux marquent : oui" --print
+    "%PYTHON%" -m betbot --forebet-html "Forebet.htm" --today --only-bettable --combo 4 --combo-market "Les deux marquent : oui" --print
 ) else (
     echo Pas de Forebet.htm : analyse des seules rencontres cotees chez Unibet.
     echo Pour ajouter les pronostics Forebet, voir le README ^(Ctrl+S sur Forebet, fichier renomme Forebet.htm ici^).
-    "%PYTHON%" -m betanalyst --from-unibet --today --combo 4 --combo-market "Les deux marquent : oui" --print
+    "%PYTHON%" -m betbot --from-unibet --today --combo 4 --combo-market "Les deux marquent : oui" --print
 )
 
 :fin

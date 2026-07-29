@@ -1,8 +1,8 @@
-"""Jeu de donnees fictif pour tester le pipeline sans reseau (`--demo`)."""
+﻿"""Jeu de donnees fictif pour tester le pipeline sans reseau (`--demo`)."""
 
 from __future__ import annotations
 
-from betanalyst.models import ForebetPrediction, MatchStats, TeamForm
+from betbot.models import ForebetPrediction, MatchStats, TeamForm
 
 _FIXTURES: list[tuple[MatchStats, ForebetPrediction]] = [
     (

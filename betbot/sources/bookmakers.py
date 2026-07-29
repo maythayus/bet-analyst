@@ -1,4 +1,4 @@
-"""Cotes des bookmakers francais.
+﻿"""Cotes des bookmakers francais.
 
 Unibet expose une API JSON publique (`/lvs-api/`) qui liste les rencontres a venir,
 mais avec le seul marche 1 N 2. Les autres marches (les deux equipes marquent, double
@@ -25,7 +25,7 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-from betanalyst.config import USER_AGENT, ScrapeConfig
+from betbot.config import USER_AGENT, ScrapeConfig
 
 log = logging.getLogger(__name__)
 

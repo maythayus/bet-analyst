@@ -1,23 +1,23 @@
-"""Orchestration : Forebet -> Flashscore -> Poisson -> LM Studio -> rapport."""
+﻿"""Orchestration : Forebet -> Flashscore -> Poisson -> LM Studio -> rapport."""
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
 
-from betanalyst import demo, poisson
-from betanalyst.config import AppConfig
-from betanalyst.llm import LMStudioClient, LMStudioError
-from betanalyst.models import (
+from betbot import demo, poisson
+from betbot.config import AppConfig
+from betbot.llm import LMStudioClient, LMStudioError
+from betbot.models import (
     Analysis,
     BookmakerLine,
     ForebetPrediction,
     MatchBundle,
     MatchStats,
 )
-from betanalyst.sources import bookmakers, flashscore, forebet
-from betanalyst.sources.bookmakers import BookmakerOdds
-from betanalyst.sources.flashscore import FlashscoreUnavailable
+from betbot.sources import bookmakers, flashscore, forebet
+from betbot.sources.bookmakers import BookmakerOdds
+from betbot.sources.flashscore import FlashscoreUnavailable
 
 log = logging.getLogger(__name__)
 

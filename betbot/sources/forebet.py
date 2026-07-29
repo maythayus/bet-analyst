@@ -1,4 +1,4 @@
-"""Collecte des predictions mathematiques de Forebet.
+﻿"""Collecte des predictions mathematiques de Forebet.
 
 Le HTML de Forebet change regulierement : le parsing est volontairement
 defensif (plusieurs selecteurs testes, valeurs manquantes tolerees).
@@ -12,9 +12,9 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
 
-from betanalyst.config import ScrapeConfig
-from betanalyst.models import ForebetPrediction
-from betanalyst.sources.http import FetchError, fetch_html
+from betbot.config import ScrapeConfig
+from betbot.models import ForebetPrediction
+from betbot.sources.http import FetchError, fetch_html
 
 log = logging.getLogger(__name__)
 

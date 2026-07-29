@@ -1,4 +1,4 @@
-"""Utilitaire HTTP avec cache disque et repli navigateur (anti-403)."""
+﻿"""Utilitaire HTTP avec cache disque et repli navigateur (anti-403)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-from betanalyst.config import USER_AGENT, ScrapeConfig
+from betbot.config import USER_AGENT, ScrapeConfig
 
 log = logging.getLogger(__name__)
 

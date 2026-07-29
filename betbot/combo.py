@@ -1,4 +1,4 @@
-"""Construction d'un ticket combine a partir des probabilites du modele.
+﻿"""Construction d'un ticket combine a partir des probabilites du modele.
 
 Les selections retenues sont les plus probables du jour, une par match. La
 probabilite d'un combine est le produit des probabilites de ses selections : elle
@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import prod
 
-from betanalyst.models import MatchBundle
+from betbot.models import MatchBundle
 
 # Chez les bookmakers le nul s'ecrit X, dans le modele il s'ecrit N.
 _SIGN_TO_MARKET = {"X": "N"}

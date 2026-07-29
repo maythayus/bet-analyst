@@ -1,4 +1,4 @@
-"""Point d'entree en ligne de commande : `python -m betanalyst`."""
+﻿"""Point d'entree en ligne de commande : `python -m betbot`."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ import logging
 import sys
 from pathlib import Path
 
-from betanalyst.combo import build_ticket
-from betanalyst.config import AppConfig
-from betanalyst.pipeline import run
-from betanalyst.report import build_markdown, write_report
-from betanalyst.sources.http import FetchError
+from betbot.combo import build_ticket
+from betbot.config import AppConfig
+from betbot.pipeline import run
+from betbot.report import build_markdown, write_report
+from betbot.sources.http import FetchError
 
 # Avec --today, la journee entiere est analysee : ce plafond n'existe que pour eviter
 # une boucle sans fin si Unibet renvoyait un listing aberrant.
@@ -20,7 +20,7 @@ ALL_MATCHES = 500
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="betanalyst",
+        prog="betbot",
         description="Collecte Forebet + Flashscore, calcule un modele de Poisson, "
         "puis fait analyser le tout par un LLM local (LM Studio).",
     )

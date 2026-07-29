@@ -1,4 +1,4 @@
-# betanalyst
+﻿# Bet.Bot
 
 Pipeline local d'aide à l'analyse de paris sportifs :
 
@@ -103,7 +103,7 @@ largement, GPU offload au maximum, et un match s'analyse en quelques secondes.
   comptez plusieurs minutes par match plutôt que quelques secondes.
 - Prendre un modèle plus léger, par exemple `qwen2.5-7b-instruct` en `Q4_K_M` (~4.7 Go)
   ou `llama-3.2-3b-instruct` en `Q4_K_M` (~2 Go), avec
-  `python -m betanalyst --model <identifiant>`.
+  `python -m betbot --model <identifiant>`.
 
 **Sans LLM du tout**, `--no-llm` produit le rapport complet — probabilités, cotes, valeur,
 ticket — sans le commentaire rédigé. C'est la partie chiffrée, et elle ne dépend pas du
@@ -144,7 +144,7 @@ playwright install chromium   # nécessaire uniquement pour Flashscore
 Vérifie que tout est en place, sans réseau ni LLM :
 
 ```powershell
-python -m betanalyst --demo --no-llm
+python -m betbot --demo --no-llm
 ```
 
 Le venv doit être réactivé (`.\.venv\Scripts\Activate.ps1`) à chaque nouvelle fenêtre
@@ -168,19 +168,19 @@ pip install -r requirements.txt   # au cas où une dépendance aurait été ajou
 
 ```powershell
 # Test hors ligne, sans réseau ni LLM : vérifie que tout fonctionne
-python -m betanalyst --demo --no-llm
+python -m betbot --demo --no-llm
 
 # Test hors ligne avec le LLM (valide la connexion à LM Studio)
-python -m betanalyst --demo
+python -m betbot --demo
 
 # Un match précis : Flashscore + Poisson + LLM, sans passer par Forebet
-python -m betanalyst --match "Lyon vs Rennes"
+python -m betbot --match "Lyon vs Rennes"
 
 # Analyse du jour : 5 matchs, Forebet + Flashscore + LLM
-python -m betanalyst --matches 5
+python -m betbot --matches 5
 
 # Sans Flashscore (plus rapide, Forebet + Poisson uniquement)
-python -m betanalyst --matches 10 --no-flashscore
+python -m betbot --matches 10 --no-flashscore
 ```
 
 Options utiles : `--model`, `--base-url`, `--temperature`, `--output`, `--no-cache`, `-v`.
@@ -231,31 +231,31 @@ le match est analysé sans statistiques et un avertissement le dit.
 
 ```powershell
 # toute la journée, en partant des cotes
-python -m betanalyst --from-unibet --today --combo 4 --combo-market "Les deux marquent : oui"
+python -m betbot --from-unibet --today --combo 4 --combo-market "Les deux marquent : oui"
 
 # analyser directement les prochaines rencontres cotées chez Unibet
-python -m betanalyst --from-unibet --matches 10 --combo 4 --combo-market "Les deux marquent : oui"
+python -m betbot --from-unibet --matches 10 --combo 4 --combo-market "Les deux marquent : oui"
 
 # ne garder que les matchs cotés chez un bookmaker
-python -m betanalyst --matches 20 --only-bettable
+python -m betbot --matches 20 --only-bettable
 
 # pronostic Forebet à au moins 95 %, avec une cote d'au moins 1.5 sur ce pronostic
-python -m betanalyst --matches 20 --only-bettable --min-prob 95 --min-odds 1.5
+python -m betbot --matches 20 --only-bettable --min-prob 95 --min-odds 1.5
 
 # uniquement les matchs offrant une cote entre 1.65 et 1.95, tries par valeur
-python -m betanalyst --matches 20 --only-bettable --odds-range 1.65 1.95
+python -m betbot --matches 20 --only-bettable --odds-range 1.65 1.95
 
 # ticket combine de 4 "les deux marquent", les plus probables du jour
-python -m betanalyst --matches 20 --combo 4 --combo-market "Les deux marquent : oui"
+python -m betbot --matches 20 --combo 4 --combo-market "Les deux marquent : oui"
 
 # ... et seulement s'il a au moins 25 % de chances de passer
-python -m betanalyst --matches 20 --combo 4 --min-combo-prob 25
+python -m betbot --matches 20 --combo 4 --min-combo-prob 25
 
 # sans ouvrir la page de chaque match (pas de cote BTTS ni de combines)
-python -m betanalyst --matches 20 --only-bettable --no-detailed-odds
+python -m betbot --matches 20 --only-bettable --no-detailed-odds
 
 # sans les cotes
-python -m betanalyst --matches 5 --no-bookmakers
+python -m betbot --matches 5 --no-bookmakers
 ```
 
 `--combo N` place en tête du rapport un ticket construit avec les N sélections les
@@ -292,7 +292,7 @@ Lyon vs Rennes;1N et oui;2.35
 ```
 
 ```powershell
-python -m betanalyst --matches 20 --only-bettable --odds-csv cotes.csv
+python -m betbot --matches 20 --only-bettable --odds-csv cotes.csv
 ```
 
 ### Marchés calculés
@@ -326,13 +326,13 @@ Si tu préfères le garder ailleurs, indique son chemin (guillemets obligatoires
 contient des espaces) :
 
 ```powershell
-python -m betanalyst --forebet-html "C:\Users\<toi>\Desktop\Football Predictions for Today _ Forebet.htm" --today --only-bettable
+python -m betbot --forebet-html "C:\Users\<toi>\Desktop\Football Predictions for Today _ Forebet.htm" --today --only-bettable
 ```
 
 Sinon, on se passe complètement de Forebet (Flashscore + Poisson + LLM) :
 
 ```powershell
-python -m betanalyst --match "Lyon vs Rennes" --match "Getafe vs Athletic Bilbao"
+python -m betbot --match "Lyon vs Rennes" --match "Getafe vs Athletic Bilbao"
 ```
 
 Les rapports sont écrits dans `out/` : `rapport-<date>.md` (lisible) et
@@ -353,13 +353,13 @@ Les rapports sont écrits dans `out/` : `rapport-<date>.md` (lisible) et
 
 | Fichier | Rôle |
 | --- | --- |
-| `betanalyst/sources/forebet.py` | scraping du listing Forebet (requests + BeautifulSoup) |
-| `betanalyst/sources/flashscore.py` | recherche des équipes (API JSON) + derniers résultats via Playwright |
-| `betanalyst/sources/bookmakers.py` | cotes Unibet (listing 1 N 2 + marchés de la page match), CSV manuel, appariement des noms d'équipes |
-| `betanalyst/poisson.py` | buts attendus, 1X2, over 2.5, BTTS, score le plus probable |
-| `betanalyst/llm.py` | client LM Studio + prompt système « analyste rigoureux » |
-| `betanalyst/pipeline.py` | orchestration, dégradation propre si une source manque |
-| `betanalyst/report.py` | rapport Markdown + export JSON |
+| `betbot/sources/forebet.py` | scraping du listing Forebet (requests + BeautifulSoup) |
+| `betbot/sources/flashscore.py` | recherche des équipes (API JSON) + derniers résultats via Playwright |
+| `betbot/sources/bookmakers.py` | cotes Unibet (listing 1 N 2 + marchés de la page match), CSV manuel, appariement des noms d'équipes |
+| `betbot/poisson.py` | buts attendus, 1X2, over 2.5, BTTS, score le plus probable |
+| `betbot/llm.py` | client LM Studio + prompt système « analyste rigoureux » |
+| `betbot/pipeline.py` | orchestration, dégradation propre si une source manque |
+| `betbot/report.py` | rapport Markdown + export JSON |
 
 ## Fiabilité : ce que fait le pipeline
 

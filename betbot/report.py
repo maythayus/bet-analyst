@@ -1,4 +1,4 @@
-"""Generation du rapport Markdown."""
+﻿"""Generation du rapport Markdown."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from betanalyst.combo import Ticket
-from betanalyst.models import Analysis, MatchBundle, implied_from_odds
+from betbot.combo import Ticket
+from betbot.models import Analysis, MatchBundle, implied_from_odds
 
 DISCLAIMER = (
     "> Rapport genere automatiquement a partir de Forebet, Flashscore, d'un modele de "
@@ -225,7 +225,7 @@ def build_markdown(
     pairs: list[tuple[MatchBundle, Analysis | None]], ticket: Ticket | None = None
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    parts = [f"# Rapport d'analyse - {now}", "", DISCLAIMER, ""]
+    parts = [f"# Bet.Bot - rapport d'analyse - {now}", "", DISCLAIMER, ""]
 
     if ticket and ticket.legs:
         parts += [

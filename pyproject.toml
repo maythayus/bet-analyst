@@ -1,5 +1,5 @@
-[project]
-name = "betanalyst"
+﻿[project]
+name = "betbot"
 version = "0.1.0"
 description = "Analyse de paris sportifs : Forebet + Flashscore + Poisson + LLM local (LM Studio)"
 requires-python = ">=3.10"
@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-betanalyst = "betanalyst.cli:main"
+betbot = "betbot.cli:main"
 
 [tool.ruff]
 line-length = 100

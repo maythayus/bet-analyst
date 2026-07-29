@@ -1,4 +1,4 @@
-"""Modele de Poisson bivarie simplifie : contre-expertise chiffree du LLM.
+﻿"""Modele de Poisson bivarie simplifie : contre-expertise chiffree du LLM.
 
 On estime les buts attendus de chaque equipe a partir de sa moyenne offensive et
 de la faiblesse defensive adverse, puis on convole les deux lois de Poisson pour
@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from math import exp, factorial
 
-from betanalyst.models import MatchStats, PoissonResult
+from betbot.models import MatchStats, PoissonResult
 
 LEAGUE_AVG_GOALS = 1.35  # buts moyens par equipe et par match (championnats europeens)
 HOME_ADVANTAGE = 1.15
