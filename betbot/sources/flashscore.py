@@ -78,6 +78,7 @@ _SPELLINGS = {
     "kiev": "kyiv",
     "kyiv": "kiev",
     "salonique": "thessaloniki",
+    "saint": "st",
 }
 
 # Flashscore nomme les pays en anglais, les bookmakers francais en francais. La table ne
