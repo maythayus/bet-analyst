@@ -14,7 +14,7 @@ from betanalyst.config import AppConfig
 from betanalyst.models import BookmakerLine, ForebetPrediction, MatchBundle
 from betanalyst.pipeline import build_bundles, filter_predictions, predictions_from_odds
 from betanalyst.report import build_markdown
-from betanalyst.sources import bookmakers
+from betanalyst.sources import bookmakers, flashscore
 from betanalyst.sources.forebet import parse_predictions
 
 SAMPLE_HTML = """
@@ -144,6 +144,10 @@ class TestBookmakers(unittest.TestCase):
         self.assertEqual((prediction.home_team, prediction.away_team), ("Lyon", "Rennes"))
         self.assertEqual(prediction.competition, "Ligue 1")
         self.assertIsNone(prediction.best_probability)
+
+    def test_reads_the_kickoff_day(self) -> None:
+        self.assertEqual(bookmakers.kickoff_day("2026-07-25 21:00"), "2026-07-25")
+        self.assertIsNone(bookmakers.kickoff_day(None))
 
     def test_reads_the_kickoff_time(self) -> None:
         (entry,) = bookmakers._parse_unibet_page(UNIBET_PAGE)
@@ -359,6 +363,43 @@ class TestCombo(unittest.TestCase):
 
     def test_unreachable_threshold_returns_no_ticket(self) -> None:
         self.assertIsNone(build_ticket(self.bundles, legs=2, min_probability=99.9))
+
+
+class TestFlashscoreSearch(unittest.TestCase):
+    """Choix du bon club parmi les resultats de recherche, sans appeler le reseau."""
+
+    def _best(self, name: str, titles: list[str], competition: str | None = None) -> str:
+        country = flashscore.country_hint(competition)
+        return max(titles, key=lambda title: flashscore.score_candidate(name, title, country))
+
+    def test_prefers_the_club_over_a_namesake_abroad(self) -> None:
+        titles = ["Libertad Asuncion (Paraguay)", "Libertad (Ecuador)", "Libertad FC (Bolivia)"]
+        self.assertEqual(self._best("Libertad Loja", titles, "D1 Equateur"), "Libertad (Ecuador)")
+
+    def test_ignores_womens_and_youth_squads(self) -> None:
+        titles = ["Hacken W (Sweden)", "Hacken U19 (Sweden)", "Hacken (Sweden)"]
+        self.assertEqual(self._best("H\u00e4cken", titles), "Hacken (Sweden)")
+
+    def test_reads_glued_and_abbreviated_names(self) -> None:
+        titles = ["FC Tiraspol (Moldova)", "Sheriff Tiraspol (Moldova)"]
+        self.assertEqual(self._best("SherifTiraspol", titles), "Sheriff Tiraspol (Moldova)")
+        self.assertEqual(
+            self._best("Universit Cluj", ["CFR Cluj (Romania)", "U. Cluj (Romania)"]),
+            "U. Cluj (Romania)",
+        )
+
+    def test_query_variants_spread_glued_names(self) -> None:
+        self.assertIn("Mac Tel Aviv", flashscore.query_variants("Mac.Tel Aviv"))
+        self.assertIn("Sherif Tiraspol", flashscore.query_variants("SherifTiraspol"))
+
+    def test_country_hint_translates_the_competition(self) -> None:
+        self.assertEqual(flashscore.country_hint("D1 Br\u00e9sil"), "d1 brazil")
+        self.assertEqual(flashscore.country_hint("D1 Paraguay"), "d1 paraguay")
+        self.assertIsNone(flashscore.country_hint(None))
+
+    def test_an_unrelated_name_stays_below_the_threshold(self) -> None:
+        score = flashscore.score_candidate("Dunav Rousse", "Monticello (France)")
+        self.assertLess(score, flashscore.NAME_THRESHOLD)
 
 
 class TestPipelineOffline(unittest.TestCase):

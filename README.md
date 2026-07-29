@@ -217,7 +217,16 @@ En ligne de commande, `--print` affiche le rapport en plus de l'écrire dans `ou
 Par défaut, seuls les 50 prochains coups d'envoi sont récupérés. `--today` enchaîne les
 pages du listing pour couvrir **toutes les rencontres de la journée** ; sans `--matches`,
 elles sont toutes analysées (compte plusieurs minutes, Flashscore ouvre deux pages par
-match).
+match). Lancé tard le soir, quand les matchs du jour sont joués, il bascule
+automatiquement sur la prochaine journée cotée et l'indique dans les logs.
+
+Les noms d'équipes du bookmaker sont abrégés (« Mac.Tel Aviv », « SherifTiraspol »,
+« Universit Cluj ») : la recherche Flashscore les déplie, écarte les joueurs, les
+équipes féminines, les réserves et les U19, et se sert du pays de la compétition pour
+départager les homonymes (le Libertad d'Équateur et celui du Paraguay). Quand le nom
+retenu diffère de celui du bookmaker, la ligne `Flashscore : 'X' identifie comme Y` le
+signale ; si aucun candidat ne convient, le match est analysé sans statistiques et un
+avertissement le dit.
 
 ```powershell
 # toute la journée, en partant des cotes

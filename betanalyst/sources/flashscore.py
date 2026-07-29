@@ -23,13 +23,75 @@ import requests
 
 from betanalyst.config import USER_AGENT, ScrapeConfig
 from betanalyst.models import MatchStats, TeamForm
+from betanalyst.sources.bookmakers import normalise, similarity
 
 log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://s.flashscore.com/search/"
 TEAM_URL = "https://www.flashscore.com/team/{slug}/{team_id}/results/"
 FOOTBALL_SPORT_ID = 1
+# La recherche renvoie aussi des joueurs (type 2), dont le libelle ressemble a un club :
+# « Rousseau Thomas (Le Havre) » ne doit pas etre pris pour « Dunav Rousse ».
+TEAM_PARTICIPANT = 1
 _JSONP = re.compile(r"^[^(]*\((.*)\)[^)]*$", re.DOTALL)
+# Le pays est accole au nom de l'equipe : « Everton (Chile) ».
+_COUNTRY = re.compile(r"\s*\([^)]*\)\s*$")
+# Equipes feminines, reserves et categories de jeunes : meme nom, autre effectif.
+_OTHER_SQUAD = re.compile(r"\b(w|b|ii|u\d{2})\b")
+_GLUED = re.compile(r"(?<=[a-z])(?=[A-Z])")
+# En dessous, le nom trouve n'a plus grand-chose a voir avec celui cherche.
+NAME_THRESHOLD = 0.6
+OTHER_SQUAD_PENALTY = 0.3
+WORD_COUNT_PENALTY = 0.05
+COUNTRY_BONUS = 0.25
+
+# Flashscore nomme les pays en anglais, les bookmakers francais en francais. La table ne
+# couvre que les pays dont les noms different assez pour ne pas se ressembler tels quels
+# (« Portugal » ou « Chile » se reconnaissent sans traduction).
+_COUNTRY_NAMES = {
+    "allemagne": "germany",
+    "angleterre": "england",
+    "argentine": "argentina",
+    "autriche": "austria",
+    "belgique": "belgium",
+    "bresil": "brazil",
+    "bulgarie": "bulgaria",
+    "chili": "chile",
+    "chypre": "cyprus",
+    "colombie": "colombia",
+    "croatie": "croatia",
+    "danemark": "denmark",
+    "ecosse": "scotland",
+    "equateur": "ecuador",
+    "espagne": "spain",
+    "estonie": "estonia",
+    "etats unis": "usa",
+    "finlande": "finland",
+    "grece": "greece",
+    "hongrie": "hungary",
+    "irlande": "ireland",
+    "islande": "iceland",
+    "israel": "israel",
+    "italie": "italy",
+    "japon": "japan",
+    "lettonie": "latvia",
+    "lituanie": "lithuania",
+    "moldavie": "moldova",
+    "norvege": "norway",
+    "pays bas": "netherlands",
+    "pologne": "poland",
+    "republique tcheque": "czech republic",
+    "roumanie": "romania",
+    "russie": "russia",
+    "serbie": "serbia",
+    "slovaquie": "slovakia",
+    "slovenie": "slovenia",
+    "suede": "sweden",
+    "suisse": "switzerland",
+    "tcheque": "czech republic",
+    "turquie": "turkiye",
+    "ukraine": "ukraine",
+}
 
 
 class FlashscoreUnavailable(RuntimeError):
@@ -71,21 +133,103 @@ def _search(query: str, cfg: ScrapeConfig) -> list[dict[str, Any]]:
     return payload.get("results", []) if isinstance(payload, dict) else []
 
 
-def find_team(name: str, cfg: ScrapeConfig) -> Team | None:
-    """Retrouve l'equipe de football correspondant le mieux au nom fourni."""
-    try:
-        results = _search(name, cfg)
-    except (requests.RequestException, ValueError) as exc:
-        log.warning("Recherche Flashscore impossible pour '%s' : %s", name, exc)
+def _spaced(name: str) -> str:
+    """Nom aere : points, tirets et mots colles separes (« Mac.Tel » -> « Mac Tel »)."""
+    return " ".join(_GLUED.sub(" ", name.replace(".", " ").replace("-", " ")).split())
+
+
+def query_variants(name: str) -> list[str]:
+    """Formes successives a essayer dans la recherche Flashscore.
+
+    Les bookmakers tronquent et collent les noms (« Mac.Tel Aviv », « SherifTiraspol ») :
+    on repart donc du nom brut, puis d'une version aeree, puis du mot le plus long, qui
+    est presque toujours le nom de la ville ou du club.
+    """
+    spaced = _spaced(name)
+    variants = [name, spaced]
+    words = [word for word in re.split(r"\W+", spaced) if len(word) > 3]
+    if words:
+        variants.append(max(words, key=len))
+    return list(dict.fromkeys(variant for variant in variants if variant))
+
+
+def country_hint(competition: str | None) -> str | None:
+    """Nom de competition ramene a l'anglais, pour y reconnaitre un pays.
+
+    « D1 Bresil » devient « d1 brazil », ce qui permet de distinguer deux clubs
+    homonymes. Les pays dont le nom est identique dans les deux langues (Paraguay,
+    Portugal) passent tels quels ; les competitions continentales ne designent aucun
+    pays et ne departagent donc rien.
+    """
+    if not competition:
+        return None
+    text = normalise(competition)
+    for french, english in _COUNTRY_NAMES.items():
+        text = text.replace(french, english)
+    return text
+
+
+def score_candidate(name: str, title: str, country: str | None = None) -> float:
+    """Ressemblance entre le nom cherche et un resultat de recherche.
+
+    Le pays entre parentheses est retire avant comparaison, et une equipe feminine,
+    reserve ou de jeunes est penalisee : elle porte le nom du club sans en etre l'equipe.
+    Quand le pays de la competition est connu, un candidat du bon pays est privilegie :
+    c'est ce qui separe le Libertad d'Equateur de ses homonymes.
+    """
+    plain = _COUNTRY.sub("", title)
+    found = _COUNTRY.search(title)
+    origin = normalise(found.group(0)) if found else ""
+    bonus = COUNTRY_BONUS if origin and country and origin in country else 0.0
+    wanted = _spaced(name)
+    score = similarity(wanted, plain)
+    if _OTHER_SQUAD.search(plain.lower()) and not _OTHER_SQUAD.search(wanted.lower()):
+        score -= OTHER_SQUAD_PENALTY
+    # A ressemblance egale, le nom comptant le meme nombre de mots l'emporte :
+    # « Sheriff Tiraspol » plutot que « FC Tiraspol » pour « SherifTiraspol ».
+    extra = abs(len(normalise(wanted).split()) - len(normalise(plain).split()))
+    return score + bonus - WORD_COUNT_PENALTY * extra
+
+
+def find_team(name: str, cfg: ScrapeConfig, *, country: str | None = None) -> Team | None:
+    """Retrouve l'equipe de football correspondant le mieux au nom fourni.
+
+    Le premier resultat renvoye par Flashscore n'est pas toujours le bon : une recherche
+    sur « Libertad Loja » propose d'abord le Libertad d'Asuncion. Les candidats sont donc
+    notes, et le nom retenu est journalise pour qu'un mauvais appariement se voie.
+    """
+    best: tuple[float, Team] | None = None
+    for query in query_variants(name):
+        try:
+            results = _search(query, cfg)
+        except (requests.RequestException, ValueError) as exc:
+            log.warning("Recherche Flashscore impossible pour '%s' : %s", query, exc)
+            continue
+
+        for item in results:
+            if item.get("type") != "participants" or item.get("sport_id") != FOOTBALL_SPORT_ID:
+                continue
+            if item.get("participant_type_id") != TEAM_PARTICIPANT:
+                continue
+            identifier, slug = item.get("id"), item.get("url")
+            if not (identifier and slug):
+                continue
+            title = str(item.get("title", name))
+            score = score_candidate(name, title, country)
+            if best is None or score > best[0]:
+                best = (score, Team(str(identifier), str(slug), title))
+
+        if best and best[0] >= NAME_THRESHOLD:
+            break
+
+    if best is None or best[0] < NAME_THRESHOLD:
+        found = f" (meilleur candidat : {best[1].title})" if best else ""
+        log.warning("Flashscore : '%s' introuvable%s", name, found)
         return None
 
-    for item in results:
-        if item.get("type") != "participants" or item.get("sport_id") != FOOTBALL_SPORT_ID:
-            continue
-        identifier, slug = item.get("id"), item.get("url")
-        if identifier and slug:
-            return Team(str(identifier), str(slug), str(item.get("title", name)))
-    return None
+    if best[0] < 1.0:
+        log.info("Flashscore : '%s' identifie comme %s", name, best[1].title)
+    return best[1]
 
 
 def _parse_results_page(page: Any, limit: int) -> list[PastMatch]:
@@ -172,13 +316,19 @@ def head_to_head(matches: list[PastMatch], opponent: str, *, limit: int = 5) -> 
     ][:limit]
 
 
-def fetch_match_stats(home_team: str, away_team: str, cfg: ScrapeConfig) -> MatchStats:
+def fetch_match_stats(
+    home_team: str, away_team: str, cfg: ScrapeConfig, *, competition: str | None = None
+) -> MatchStats:
     """Assemble forme des deux equipes + confrontations directes."""
-    home = find_team(home_team, cfg)
-    away = find_team(away_team, cfg)
-    if not home or not away:
+    country = country_hint(competition)
+    home = find_team(home_team, cfg, country=country)
+    away = find_team(away_team, cfg, country=country)
+    missing = [name for name, team in ((home_team, home), (away_team, away)) if not team]
+    if missing or not (home and away):
         raise FlashscoreUnavailable(
-            f"Equipe introuvable sur Flashscore : {home_team} / {away_team}"
+            f"Equipe introuvable sur Flashscore : {', '.join(missing)}. "
+            "Le nom vient du bookmaker et peut etre tronque ; utilise --match "
+            f'"{home_team} vs {away_team}" avec les noms complets pour forcer la recherche.'
         )
 
     home_matches = fetch_team_results(home, cfg)

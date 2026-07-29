@@ -32,7 +32,10 @@ def _collect_stats(
     elif use_flashscore:
         try:
             stats = flashscore.fetch_match_stats(
-                prediction.home_team, prediction.away_team, cfg.scrape
+                prediction.home_team,
+                prediction.away_team,
+                cfg.scrape,
+                competition=prediction.competition,
             )
             stats.competition = stats.competition or prediction.competition
             stats.kickoff = stats.kickoff or prediction.kickoff

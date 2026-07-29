@@ -38,6 +38,8 @@ UNIBET_URL = (
 )
 # Au-dela, on sort largement de la journee en cours meme un jour de grosse affiche.
 UNIBET_MAX_PAGES = 12
+UNIBET_ATTEMPTS = 4
+UNIBET_RETRY_DELAY = 3.0
 # L'API refuse les appels sans Referer/Origin du site (reponse 'Missing X-LVS-HSToken').
 UNIBET_HEADERS = {
     "User-Agent": USER_AGENT,
@@ -72,6 +74,7 @@ DOUBLE_CHANCE = {("1", "N"): "1N", ("1", "2"): "12", ("2", "N"): "N2"}
 # volontairement absents : ils distinguent des clubs d'une meme ville.
 _NOISE = re.compile(r"\b(fc|cf|sc|ac|as|ss|us|sv|if|fk|sk|nk|hk|bk|afc|cd|ud|rc|rcd|club)\b")
 TOKEN_THRESHOLD = 0.75
+ABBREVIATION_LENGTH = 2
 PREFIX_LENGTH = 4
 
 
@@ -88,7 +91,11 @@ def _same_token(left: str, right: str) -> bool:
     if left == right:
         return True
     shortest, longest = sorted((left, right), key=len)
-    if len(shortest) >= PREFIX_LENGTH and longest.startswith(shortest):
+    if longest.startswith(shortest) and (
+        len(shortest) >= PREFIX_LENGTH or len(shortest) <= ABBREVIATION_LENGTH
+    ):
+        # « U. Cluj » pour Universitatea Cluj : une initiale suivie d'un point est une
+        # abreviation courante des grilles de cotes comme de Flashscore.
         return True
     return SequenceMatcher(None, left, right).ratio() >= TOKEN_THRESHOLD
 
@@ -256,7 +263,7 @@ def _unibet_get(url: str, cfg: ScrapeConfig, *, html: bool = False) -> requests.
     if html:
         headers["Accept"] = "text/html,application/xhtml+xml"
 
-    for attempt in (1, 2, 3):
+    for attempt in range(UNIBET_ATTEMPTS):
         try:
             response = _unibet_session(cfg).get(url, headers=headers, timeout=cfg.request_timeout)
         except requests.RequestException as exc:
@@ -264,9 +271,11 @@ def _unibet_get(url: str, cfg: ScrapeConfig, *, html: bool = False) -> requests.
             return None
         if response.status_code == 200:
             return response
-        if response.status_code == 401 and attempt < 3:
-            _session = None  # session expiree ou refusee : on en rouvre une
-            time.sleep(attempt)
+        if response.status_code == 401 and attempt < UNIBET_ATTEMPTS - 1:
+            # Session expiree ou trop d'appels rapproches : on en rouvre une, en
+            # laissant passer un peu de temps sinon la suivante est refusee aussi.
+            _session = None
+            time.sleep(UNIBET_RETRY_DELAY * (attempt + 1))
             continue
         log.warning("Unibet : HTTP %s sur %s (%s)", response.status_code, url, response.text[:120])
         return None
@@ -410,16 +419,24 @@ def fetch_unibet(cfg: ScrapeConfig, *, today_only: bool = False) -> list[Bookmak
         found = _parse_unibet_page(response.json())
         if not found:
             break
-        if today_only:
-            kept = [entry for entry in found if kickoff_day(entry.kickoff) == day]
-            entries.extend(kept)
-            if len(kept) < len(found):  # la page deborde sur les jours suivants
-                break
-        else:
+        if not today_only:
             entries.extend(found)
+            break
+
+        days = [kickoff_day(entry.kickoff) for entry in found]
+        if page == 0 and day not in days:
+            # Tard le soir, les rencontres du jour sont jouees : on prend la journee
+            # suivante, celle des prochains coups d'envoi cotes.
+            day = min((value for value in days if value), default=day)
+            log.info("Unibet : plus de rencontre aujourd'hui, passage au %s", day)
+
+        kept = [entry for entry, value in zip(found, days, strict=True) if value == day]
+        entries.extend(kept)
+        if len(kept) < len(found):  # la page deborde sur les jours suivants
+            break
 
     if today_only:
-        log.info("Unibet : %d rencontres cotees aujourd'hui", len(entries))
+        log.info("Unibet : %d rencontres cotees le %s", len(entries), day)
     else:
         log.info("Unibet : %d rencontres cotees", len(entries))
     return entries
