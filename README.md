@@ -214,6 +214,20 @@ analyse.cmd --matches 20 --odds-range 1.65 1.95 --print    tes propres options
 
 En ligne de commande, `--print` affiche le rapport en plus de l'écrire dans `out/`.
 
+### Version exécutable (`Bet.Bot.exe`)
+
+`build-exe.cmd` fabrique un `dist\Bet.Bot.exe` autonome (~47 Mo), qui tourne sans Python
+installé. Les rapports sont écrits dans un dossier `out\` **à côté de l'exécutable**.
+
+```powershell
+.\build-exe.cmd                 # construit dist\Bet.Bot.exe
+.\dist\Bet.Bot.exe --install-chromium   # une seule fois : navigateur pour Flashscore
+.\dist\Bet.Bot.exe --from-unibet --today --combo 4 --print
+```
+
+Le navigateur Chromium (~300 Mo) n'est pas embarqué : il s'installe une fois avec
+`--install-chromium`, sinon utilise `--no-flashscore` pour se passer des statistiques.
+
 Par défaut, seuls les 50 prochains coups d'envoi sont récupérés. `--today` enchaîne les
 pages du listing pour couvrir **toutes les rencontres de la journée** ; sans `--matches`,
 elles sont toutes analysées (compte plusieurs minutes, Flashscore ouvre deux pages par

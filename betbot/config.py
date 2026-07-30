@@ -3,12 +3,26 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Depuis Bet.Bot.exe, les sources vivent dans un dossier temporaire : les rapports doivent
+# quand meme atterrir a cote de l'executable, la ou l'utilisateur ira les chercher.
+PROJECT_ROOT = (
+    Path(sys.executable).resolve().parent
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent.parent
+)
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "out"
 DEFAULT_CACHE_DIR = PROJECT_ROOT / ".cache"
+
+# Dans l'executable, Playwright cherche Chromium dans son dossier temporaire, qui est
+# recree a chaque lancement : on le renvoie vers l'emplacement standard de l'utilisateur.
+if getattr(sys, "frozen", False):
+    os.environ.setdefault(
+        "PLAYWRIGHT_BROWSERS_PATH", str(Path.home() / "AppData" / "Local" / "ms-playwright")
+    )
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

@@ -345,6 +345,7 @@ def _parse_results_page(page: Any, limit: int) -> list[PastMatch]:
 def fetch_team_results(team: Team, cfg: ScrapeConfig, *, limit: int = 10) -> list[PastMatch]:
     """Ouvre la page 'resultats' d'une equipe et lit ses derniers matchs joues."""
     try:
+        from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import TimeoutError as PlaywrightTimeout
         from playwright.sync_api import sync_playwright
     except ImportError as exc:  # pragma: no cover - depend de l'installation
@@ -357,10 +358,16 @@ def fetch_team_results(team: Team, cfg: ScrapeConfig, *, limit: int = 10) -> lis
     log.info("Flashscore : %s", url)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(
-            headless=cfg.flashscore_headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+        try:
+            browser = playwright.chromium.launch(
+                headless=cfg.flashscore_headless,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
+        except PlaywrightError as exc:  # pragma: no cover - depend de l'installation
+            raise FlashscoreUnavailable(
+                "Chromium n'est pas installe. Lance une fois : "
+                "Bet.Bot.exe --install-chromium (ou playwright install chromium)"
+            ) from exc
         page = browser.new_page(user_agent=USER_AGENT, locale="fr-FR")
         try:
             page.goto(url, timeout=cfg.flashscore_timeout_ms, wait_until="domcontentloaded")

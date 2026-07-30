@@ -131,9 +131,29 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="afficher le rapport dans la console en plus de l'ecrire dans out/",
     )
+    parser.add_argument(
+        "--install-chromium",
+        action="store_true",
+        help="telecharger le navigateur dont Flashscore a besoin, puis quitter",
+    )
     parser.add_argument("--demo", action="store_true", help="donnees fictives, aucun acces reseau")
     parser.add_argument("--verbose", "-v", action="store_true", help="logs detailles")
     return parser.parse_args(argv)
+
+
+def install_chromium() -> int:
+    """Telecharge Chromium pour Playwright, y compris depuis Bet.Bot.exe."""
+    from playwright.__main__ import main as playwright_main
+
+    argv = sys.argv
+    sys.argv = ["playwright", "install", "chromium"]
+    try:
+        playwright_main()
+    except SystemExit as exit_code:
+        return int(exit_code.code or 0)
+    finally:
+        sys.argv = argv
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -147,6 +167,9 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)-7s %(name)s: %(message)s",
     )
+
+    if args.install_chromium:
+        return install_chromium()
 
     cfg = AppConfig()
     if args.matches:
