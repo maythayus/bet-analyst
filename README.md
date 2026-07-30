@@ -383,9 +383,10 @@ python -m betbot --forebet-html "C:\Users\<toi>\Desktop\Football Predictions for
 ### Pages Forebet par marché (les deux marquent, +/-2.5, double chance, mi-temps)
 
 Forebet publie une page par marché. Enregistre-les de la même façon (Ctrl+S) **dans le
-dossier du projet, sans les renommer** : `analyse.cmd` ramasse tout seul les fichiers
-`Predictions*.htm` et affiche « Page Forebet trouvee : ... » pour chacun. Rien d'autre à
-faire.
+dossier du projet, sans les renommer** : Bet.Bot ramasse tout seul les fichiers
+`Predictions*.htm` du dossier courant (et de celui de `Bet.Bot.exe`), et affiche « Page
+Forebet trouvee : ... » pour chacun. Rien d'autre à faire, que tu passes par
+`analyse.cmd`, `python -m betbot` ou l'exécutable.
 
 En ligne de commande, chaque fichier se passe à `--forebet-market-html`, option
 répétable :

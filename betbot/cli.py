@@ -60,7 +60,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         metavar="FICHIER",
         help="page Forebet d'un marche (both to score, under/over 2.5, double chance, "
-        "mi-temps) sauvegardee a la main ; repetable",
+        "mi-temps) sauvegardee a la main ; repetable. Par defaut, les fichiers "
+        "Predictions*.htm du dossier courant sont pris automatiquement",
     )
     parser.add_argument(
         "--no-bookmakers", action="store_true", help="ne pas recuperer les cotes Unibet"
@@ -170,6 +171,25 @@ def install_chromium() -> int:
     return 0
 
 
+def discover_market_pages() -> list[Path]:
+    """Pages Forebet par marche posees a cote de l'executable ou dans le dossier courant.
+
+    Evite d'avoir a taper quatre chemins : les fichiers enregistres par le navigateur
+    s'appellent « Predictions Both to score _ Today Forebet Football.htm » et derives.
+    """
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for folder in (Path.cwd(), Path(sys.argv[0]).resolve().parent):
+        for path in sorted(folder.glob("Predictions*.htm*")):
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                found.append(path)
+    for path in found:
+        print(f"Page Forebet trouvee : {path.name}")
+    return found
+
+
 def main(argv: list[str] | None = None) -> int:
     # La console Windows est en cp1252 : sans cela, les accents du rapport la font planter.
     for stream in (sys.stdout, sys.stderr):
@@ -184,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.install_chromium:
         return install_chromium()
+
+    market_pages = args.forebet_market_html or discover_market_pages()
 
     cfg = AppConfig()
     if args.matches:
@@ -209,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
             use_cache=not args.no_cache,
             offline=args.demo,
             forebet_html=args.forebet_html,
-            forebet_market_html=args.forebet_market_html,
+            forebet_market_html=market_pages,
             matches=args.match,
             use_bookmakers=not args.no_bookmakers,
             only_bettable=args.only_bettable,

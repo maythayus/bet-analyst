@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -11,6 +12,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betbot import demo, poisson
+from betbot.cli import discover_market_pages
 from betbot.combo import build_ticket, build_value_ticket
 from betbot.config import AppConfig, ScrapeConfig
 from betbot.models import BookmakerLine, ForebetPrediction, MatchBundle
@@ -111,6 +113,27 @@ class TestForebetMarketPages(unittest.TestCase):
     def test_rejects_an_unrelated_page(self) -> None:
         with self.assertRaises(FetchError):
             parse_market_page("<html><head><title>Forebet</title></head></html>")
+
+
+class TestDiscoverMarketPages(unittest.TestCase):
+    def test_finds_saved_pages_in_the_current_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "Predictions Both to score _ Today Forebet Football.htm").touch()
+            (root / "Predictions Double chance _ Today Forebet Football.html").touch()
+            (root / "Forebet.htm").touch()
+            with (
+                mock.patch("betbot.cli.Path.cwd", return_value=root),
+                mock.patch.object(sys, "argv", [str(root / "Bet.Bot.exe")]),
+            ):
+                found = {path.name for path in discover_market_pages()}
+        self.assertEqual(
+            found,
+            {
+                "Predictions Both to score _ Today Forebet Football.htm",
+                "Predictions Double chance _ Today Forebet Football.html",
+            },
+        )
 
 
 class TestMergeForebetMarkets(unittest.TestCase):

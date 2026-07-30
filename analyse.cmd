@@ -8,7 +8,7 @@ rem
 rem   analyse.cmd                        analyse de la journee
 rem   analyse.cmd --matches 20 --print   tes propres options, passees telles quelles
 
-setlocal enabledelayedexpansion
+setlocal
 cd /d "%~dp0"
 chcp 65001 >nul
 
@@ -35,21 +35,16 @@ if not "%~1"=="" (
     goto :fin
 )
 
-rem Pages Forebet par marche posees ici telles qu'enregistrees ("Predictions Both to
-rem score _ Today Forebet Football.htm", ...) : ramassees sans chemin a taper.
-set "MARCHES="
-for %%f in ("Predictions*.htm") do (
-    echo Page Forebet trouvee : %%~nxf
-    set "MARCHES=!MARCHES! --forebet-market-html "%%~ff""
-)
+rem Les pages Forebet par marche ("Predictions Both to score _ Today Forebet
+rem Football.htm", ...) posees ici sont ramassees par Bet.Bot lui-meme.
 
 if exist "Forebet.htm" (
     echo Forebet.htm trouve : pronostics Forebet + cotes Unibet du jour.
-    "%PYTHON%" -m betbot --forebet-html "Forebet.htm" --today --only-bettable --combo 4 --combo-market "Les deux marquent : oui" --print !MARCHES!
+    "%PYTHON%" -m betbot --forebet-html "Forebet.htm" --today --only-bettable --combo 4 --combo-market "Les deux marquent : oui" --print
 ) else (
     echo Pas de Forebet.htm : analyse des seules rencontres cotees chez Unibet.
     echo Pour ajouter les pronostics Forebet, voir le README ^(Ctrl+S sur Forebet, fichier renomme Forebet.htm ici^).
-    "%PYTHON%" -m betbot --from-unibet --today --combo 4 --combo-market "Les deux marquent : oui" --print !MARCHES!
+    "%PYTHON%" -m betbot --from-unibet --today --combo 4 --combo-market "Les deux marquent : oui" --print
 )
 
 :fin
