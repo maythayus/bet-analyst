@@ -51,6 +51,10 @@ class ForebetPrediction:
     avg_goals: float | None = None
     odds: dict[str, float] = field(default_factory=dict)
     url: str | None = None
+    # Probabilites publiees par les pages Forebet specialisees (les deux equipes
+    # marquent, plus/moins de buts, double chance, mi-temps), nommees comme les
+    # marches du modele quand l'equivalent existe. "Plus de 2.5 buts" -> 61.0
+    markets: dict[str, float] = field(default_factory=dict)
 
     def implied_probabilities(self) -> dict[str, float] | None:
         """Probabilites implicites des cotes, corrigees de la marge du bookmaker."""

@@ -380,6 +380,39 @@ contient des espaces) :
 python -m betbot --forebet-html "C:\Users\<toi>\Desktop\Football Predictions for Today _ Forebet.htm" --today --only-bettable
 ```
 
+### Pages Forebet par marché (les deux marquent, +/-2.5, double chance, mi-temps)
+
+Forebet publie une page par marché. Enregistre-les de la même façon (Ctrl+S), puis passe
+chaque fichier à `--forebet-market-html`, option répétable :
+
+```powershell
+python -m betbot --from-unibet --today `
+  --forebet-market-html "Predictions Both to score _ Today Forebet Football.htm" `
+  --forebet-market-html "Predictions Under_Over 2.5 goals _ Today Forebet Football.htm" `
+  --forebet-market-html "Predictions Double chance _ Today Forebet Football.htm" `
+  --forebet-market-html "Predictions Half Time (HT) _ Today Forebet Football.htm"
+```
+
+Pages reconnues (le type est déduit du titre de la page, l'ordre des fichiers est libre) :
+
+| Page Forebet | Marchés ajoutés au rapport |
+| --- | --- |
+| `both-to-score` | Les deux marquent : oui / non |
+| `under-over-25-goals` | Plus de 2.5 buts / Moins de 2.5 buts |
+| `double-chance-predictions` | 1N, 12, N2 |
+| `predictions-ht` | 1, N, 2 de la 1re mi-temps |
+
+Ces probabilités apparaissent dans une section **Marchés (pages Forebet)** de chaque
+match, à côté de celles du modèle et de la cote Unibet, et dans le JSON sous
+`forebet.markets`. Forebet ne donnant qu'un pourcentage par rencontre, le marché
+complémentaire est déduit (« oui » à 22 % quand « non » est à 78 %).
+
+Deux limites à garder en tête : les pronostics des pages de mi-temps n'ont pas
+d'équivalent dans le modèle (la colonne « proba modèle » reste vide, et ils ne servent
+donc pas aux combinés), et un accord entre Forebet et le modèle ne valide rien — deux
+estimations peuvent se tromper ensemble. Un désaccord marqué, en revanche, est un bon
+signal de prudence.
+
 Sinon, on se passe complètement de Forebet (Flashscore + Poisson + LLM) :
 
 ```powershell

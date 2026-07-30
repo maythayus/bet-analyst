@@ -14,10 +14,16 @@ from betbot import demo, poisson
 from betbot.combo import build_ticket, build_value_ticket
 from betbot.config import AppConfig, ScrapeConfig
 from betbot.models import BookmakerLine, ForebetPrediction, MatchBundle
-from betbot.pipeline import build_bundles, filter_predictions, predictions_from_odds
+from betbot.pipeline import (
+    build_bundles,
+    filter_predictions,
+    merge_forebet_markets,
+    predictions_from_odds,
+)
 from betbot.report import build_markdown
 from betbot.sources import bookmakers, flashscore
-from betbot.sources.forebet import parse_predictions
+from betbot.sources.forebet import parse_market_page, parse_predictions
+from betbot.sources.http import FetchError
 
 SAMPLE_HTML = """
 <div class="rcnt">
@@ -46,6 +52,83 @@ class TestForebetParsing(unittest.TestCase):
 
     def test_ignores_rows_without_teams(self) -> None:
         self.assertEqual(parse_predictions('<div class="rcnt"><span>x</span></div>'), [])
+
+
+def _market_page(title: str, pick: str, probability: str, columns: str = "") -> str:
+    """Page Forebet dediee a un marche, reduite a une rencontre."""
+    return f"""
+<html><head><title>{title}</title></head><body>
+<div class="rcnt">
+  <span class="shortTag">FR1</span>
+  <span class="date_bah">26/07/2026 21:00</span>
+  <span class="homeTeam"><span>Lyon</span></span>
+  <span class="awayTeam"><span>Rennes</span></span>
+  <div class="fprc">{columns}</div>
+  <div class="predict"><span class="forepr">{pick}</span></div>
+  <span class="fpr">{probability}</span>
+</div>
+</body></html>
+"""
+
+
+class TestForebetMarketPages(unittest.TestCase):
+    def test_both_to_score_page_gives_both_sides(self) -> None:
+        page, (prediction,) = parse_market_page(
+            _market_page("Predictions Both to score | Today Forebet Football", "No", "78")
+        )
+        self.assertEqual(page, "both to score")
+        self.assertEqual(prediction.markets["Les deux marquent : non"], 78.0)
+        self.assertEqual(prediction.markets["Les deux marquent : oui"], 22.0)
+
+    def test_under_over_page_uses_the_predicted_side(self) -> None:
+        _, (prediction,) = parse_market_page(
+            _market_page(
+                "Predictions Under/Over 2.5 goals | Today Forebet Football", "Over", "61"
+            )
+        )
+        self.assertEqual(prediction.markets["Plus de 2.5 buts"], 61.0)
+        self.assertEqual(prediction.markets["Moins de 2.5 buts"], 39.0)
+
+    def test_double_chance_page_uses_model_market_names(self) -> None:
+        _, (prediction,) = parse_market_page(
+            _market_page("Predictions Double chance | Today Forebet Football", "X1", "74")
+        )
+        self.assertEqual(prediction.markets, {"1N": 74.0})
+
+    def test_half_time_page_reads_the_three_columns(self) -> None:
+        _, (prediction,) = parse_market_page(
+            _market_page(
+                "Predictions Half Time (HT) | Today Forebet Football",
+                "2",
+                "51",
+                columns="<span>10</span><span>39</span><span>51</span>",
+            )
+        )
+        self.assertEqual(prediction.markets["1 (1re mi-temps)"], 10.0)
+        self.assertEqual(prediction.markets["N (1re mi-temps)"], 39.0)
+        self.assertEqual(prediction.markets["2 (1re mi-temps)"], 51.0)
+
+    def test_rejects_an_unrelated_page(self) -> None:
+        with self.assertRaises(FetchError):
+            parse_market_page("<html><head><title>Forebet</title></head></html>")
+
+
+class TestMergeForebetMarkets(unittest.TestCase):
+    def test_matches_on_approximate_team_names(self) -> None:
+        prediction = ForebetPrediction(home_team="Olympique Lyonnais", away_team="Stade Rennais")
+        extra = ForebetPrediction(
+            home_team="Lyon", away_team="Rennes", markets={"Plus de 2.5 buts": 61.0}
+        )
+        merge_forebet_markets([prediction], [extra])
+        self.assertEqual(prediction.markets, {"Plus de 2.5 buts": 61.0})
+
+    def test_leaves_unknown_fixtures_untouched(self) -> None:
+        prediction = ForebetPrediction(home_team="Lyon", away_team="Rennes")
+        extra = ForebetPrediction(
+            home_team="Lille", away_team="Nantes", markets={"Plus de 2.5 buts": 61.0}
+        )
+        merge_forebet_markets([prediction], [extra])
+        self.assertEqual(prediction.markets, {})
 
 
 class TestImpliedProbabilities(unittest.TestCase):

@@ -136,6 +136,40 @@ def _markets_block(bundle: MatchBundle, *, top: int = 12) -> str:
     return "\n".join(rows)
 
 
+def _forebet_markets_block(bundle: MatchBundle) -> str:
+    """Probabilites des pages Forebet specialisees, face au modele et a la cote.
+
+    Forebet est une source independante : un ecart marque avec le modele Poisson est
+    un signal de prudence, pas un arbitrage, aucune des deux estimations n'etant
+    verifiable a l'avance.
+    """
+    markets = bundle.forebet.markets
+    if not markets:
+        return ""
+
+    available = bundle.best_odds()
+    model = bundle.poisson.markets if bundle.poisson else {}
+    rows = [
+        "| Marche | Proba Forebet | Proba modele | Cote dispo |",
+        "| --- | --- | --- | --- |",
+    ]
+    for market, probability in sorted(markets.items(), key=lambda item: item[1], reverse=True):
+        mine = model.get(market)
+        offered = available.get(market)
+        rows.append(
+            f"| {market} | {probability:.0f} % | "
+            f"{f'{mine:.1f} %' if mine is not None else '-'} | "
+            f"{f'{offered:.2f}' if offered else '-'} |"
+        )
+    rows += [
+        "",
+        "_Les marches de mi-temps n'ont pas d'equivalent dans le modele : la colonne "
+        "« proba modele » reste vide. Deux estimations proches ne valident rien, elles "
+        "peuvent se tromper ensemble._",
+    ]
+    return "\n".join(rows)
+
+
 def _form_block(bundle: MatchBundle) -> str:
     stats = bundle.stats
     lines = []
@@ -320,6 +354,9 @@ def build_markdown(
         markets_block = _markets_block(bundle)
         if markets_block:
             parts += ["### Marches (modele Poisson)", markets_block, ""]
+        forebet_block = _forebet_markets_block(bundle)
+        if forebet_block:
+            parts += ["### Marches (pages Forebet)", forebet_block, ""]
         if analysis:
             parts += [f"### Analyse LLM ({analysis.model})", analysis.markdown, ""]
         else:

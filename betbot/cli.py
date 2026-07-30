@@ -54,6 +54,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="page Forebet sauvegardee a la main (contourne le blocage anti-bot)",
     )
     parser.add_argument(
+        "--forebet-market-html",
+        type=Path,
+        action="append",
+        default=None,
+        metavar="FICHIER",
+        help="page Forebet d'un marche (both to score, under/over 2.5, double chance, "
+        "mi-temps) sauvegardee a la main ; repetable",
+    )
+    parser.add_argument(
         "--no-bookmakers", action="store_true", help="ne pas recuperer les cotes Unibet"
     )
     parser.add_argument(
@@ -200,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
             use_cache=not args.no_cache,
             offline=args.demo,
             forebet_html=args.forebet_html,
+            forebet_market_html=args.forebet_market_html,
             matches=args.match,
             use_bookmakers=not args.no_bookmakers,
             only_bettable=args.only_bettable,

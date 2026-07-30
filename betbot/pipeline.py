@@ -111,6 +111,29 @@ def enrich_with_detailed_markets(
             entry.odds.update(bookmakers.fetch_event_markets(entry, cfg.scrape))
 
 
+def merge_forebet_markets(
+    predictions: list[ForebetPrediction], extra: list[ForebetPrediction]
+) -> None:
+    """Ajoute aux rencontres les probabilites des pages Forebet par marche.
+
+    Les noms d'equipes de ces pages sont ceux de Forebet, pas ceux du bookmaker :
+    l'appariement passe par la comparaison tolerante deja utilisee pour les cotes.
+    """
+    for prediction in predictions:
+        for candidate in extra:
+            if bookmakers.teams_match(
+                candidate.home_team, prediction.home_team
+            ) and bookmakers.teams_match(candidate.away_team, prediction.away_team):
+                prediction.markets.update(candidate.markets)
+                break
+        else:
+            log.info(
+                "Forebet par marche : rien pour %s vs %s",
+                prediction.home_team,
+                prediction.away_team,
+            )
+
+
 def _lines_for(
     prediction: ForebetPrediction, entries: list[BookmakerOdds]
 ) -> list[BookmakerLine]:
@@ -234,6 +257,7 @@ def run(
     use_cache: bool = True,
     offline: bool = False,
     forebet_html: Path | None = None,
+    forebet_market_html: list[Path] | None = None,
     matches: list[str] | None = None,
     use_bookmakers: bool = True,
     only_bettable: bool = False,
@@ -265,6 +289,9 @@ def run(
     if not predictions:
         log.warning("Aucune rencontre a analyser (source vide ou structure modifiee ?)")
         return []
+
+    if forebet_market_html:
+        merge_forebet_markets(predictions, forebet.read_market_pages(forebet_market_html))
 
     if odds:
         before = len(predictions)

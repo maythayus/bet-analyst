@@ -97,6 +97,118 @@ def parse_predictions(html: str, limit: int | None = None) -> list[ForebetPredic
     return predictions
 
 
+# La mi-temps n'a pas d'equivalent dans le modele : ces marches restent informatifs.
+HALF_TIME_MARKETS = ("1 (1re mi-temps)", "N (1re mi-temps)", "2 (1re mi-temps)")
+
+# Pages Forebet consacrees a un seul marche : le titre de la page les distingue, et
+# `forepr` donne le pronostic dont `fpr` est la probabilite. Le marche complementaire
+# vaut 100 moins cette probabilite, les deux issues etant exclusives.
+_TWO_WAY_PAGES: dict[str, tuple[str, str, str]] = {
+    # titre -> (pronostic positif, marche correspondant, marche complementaire)
+    "both to score": ("yes", "Les deux marquent : oui", "Les deux marquent : non"),
+    "under/over 2.5 goals": ("over", "Plus de 2.5 buts", "Moins de 2.5 buts"),
+}
+# Doubles chances : Forebet ecrit indifferemment 1X ou X1, le modele n'ecrit que 1N.
+_DOUBLE_CHANCE = {"1x": "1N", "x1": "1N", "x2": "N2", "2x": "N2", "12": "12", "21": "12"}
+
+
+def _market_probabilities(row: Tag, page: str) -> dict[str, float]:
+    """Probabilites du marche traite par la page, pour une ligne de rencontre."""
+    pick = _first_text(row, [".forepr"])
+    probability = _to_float(_first_text(row, [".fpr"]))
+    if not pick or probability is None:
+        return {}
+
+    pick = pick.strip().lower()
+    if page in _TWO_WAY_PAGES:
+        positive, market, opposite = _TWO_WAY_PAGES[page]
+        if pick.startswith(positive):
+            return {market: probability, opposite: round(100 - probability, 2)}
+        return {market: round(100 - probability, 2), opposite: probability}
+
+    if page == "double chance":
+        market = _DOUBLE_CHANCE.get(pick)
+        return {market: probability} if market else {}
+
+    if page == "half time":
+        # La mi-temps est donnee en 1 X 2 : la colonne du pronostic ne suffit pas, les
+        # trois probabilites sont lues dans l'ordre.
+        home, draw, away = _parse_probabilities(row)
+        if None in (home, draw, away):
+            return {}
+        return dict(zip(HALF_TIME_MARKETS, (home, draw, away), strict=True))
+
+    return {}
+
+
+def market_page_kind(html: str | bytes) -> str | None:
+    """Marche traite par une page Forebet specialisee, d'apres son titre."""
+    soup = BeautifulSoup(html, "html.parser")
+    title = soup.title.get_text(" ", strip=True).lower() if soup.title else ""
+    for key in (*_TWO_WAY_PAGES, "double chance", "half time"):
+        if key in title:
+            return key
+    return None
+
+
+def parse_market_page(html: str | bytes) -> tuple[str, list[ForebetPrediction]]:
+    """Lit une page Forebet dediee a un marche (both to score, under/over 2.5...).
+
+    Retourne le marche reconnu et une prediction par rencontre, dont seul `markets`
+    est renseigne : ces pages n'affichent pas les probabilites 1 X 2 du temps
+    reglementaire, sauf la page de mi-temps qui les donne pour la premiere periode.
+    """
+    page = market_page_kind(html)
+    if page is None:
+        raise FetchError(
+            "Page Forebet non reconnue : attendu une page « Both to score », "
+            "« Under/Over 2.5 goals », « Double chance » ou « Half Time (HT) »."
+        )
+
+    soup = BeautifulSoup(html, "html.parser")
+    predictions: list[ForebetPrediction] = []
+    for row in soup.select("div.rcnt"):
+        home = _first_text(row, [".homeTeam span", ".homeTeam", ".hom"])
+        away = _first_text(row, [".awayTeam span", ".awayTeam", ".awy"])
+        markets = _market_probabilities(row, page) if home and away else {}
+        if not markets:
+            continue
+        predictions.append(
+            ForebetPrediction(
+                home_team=home,
+                away_team=away,
+                kickoff=_first_text(row, [".date_bah", ".date", ".stime"]),
+                competition=_first_text(row, [".shortTag", ".tnmscn a", ".leag"]),
+                markets=markets,
+            )
+        )
+
+    log.info("Forebet (%s) : %d rencontres lues", page, len(predictions))
+    return page, predictions
+
+
+def read_market_pages(paths: list[Path]) -> list[ForebetPrediction]:
+    """Fusionne plusieurs pages Forebet specialisees, une entree par rencontre."""
+    merged: dict[tuple[str, str], ForebetPrediction] = {}
+    for path in paths:
+        if not path.is_file():
+            raise FetchError(
+                f"Fichier introuvable : {path}. Verifie le chemin exact "
+                "(guillemets obligatoires s'il contient des espaces)."
+            )
+        # Les pages enregistrees depuis un navigateur ne sont pas toujours en UTF-8 :
+        # BeautifulSoup deduit l'encodage du meta charset quand on lui passe les octets.
+        _, predictions = parse_market_page(path.read_bytes())
+        for prediction in predictions:
+            key = (prediction.home_team, prediction.away_team)
+            existing = merged.get(key)
+            if existing is None:
+                merged[key] = prediction
+            else:
+                existing.markets.update(prediction.markets)
+    return list(merged.values())
+
+
 def fetch_predictions(
     cfg: ScrapeConfig, *, use_cache: bool = True, html_file: Path | None = None
 ) -> list[ForebetPrediction]:
