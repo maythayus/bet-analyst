@@ -36,6 +36,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model", default=None, help="identifiant du modele charge dans LM Studio")
     parser.add_argument("--base-url", default=None, help="URL de l'API LM Studio")
     parser.add_argument(
+        "--api-key",
+        default=None,
+        help="cle d'API du serveur LM Studio (defaut : variable LMSTUDIO_API_KEY)",
+    )
+    parser.add_argument(
         "--temperature", type=float, default=None, help="temperature (0 recommande)"
     )
     parser.add_argument("--output", type=Path, default=None, help="dossier de sortie des rapports")
@@ -178,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg.scrape.max_matches = ALL_MATCHES
     if args.model:
         cfg.lmstudio.model = args.model
+    if args.api_key:
+        cfg.lmstudio.api_key = args.api_key
     if args.base_url:
         cfg.lmstudio.base_url = args.base_url
     if args.temperature is not None:

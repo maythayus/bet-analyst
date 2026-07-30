@@ -164,6 +164,15 @@ pip install -r requirements.txt   # au cas où une dépendance aurait été ajou
 2. Charge-le avec un contexte de 16384 tokens et **GPU offload au maximum**.
 3. Onglet **Developer** → **Start Server** (par défaut `http://localhost:1234`).
 
+Un serveur local n'exige aucune clé. S'il en demande une (serveur distant, LM Studio
+exposé sur le réseau), passe-la par `--api-key` ou par la variable `LMSTUDIO_API_KEY` :
+ne l'écris jamais dans le dépôt.
+
+```powershell
+$env:LMSTUDIO_API_KEY = "<ta-cle>"
+$env:LMSTUDIO_BASE_URL = "http://<hote>:1234/v1"   # si le serveur n'est pas local
+```
+
 ## Utilisation
 
 ```powershell
@@ -183,7 +192,8 @@ python -m betbot --matches 5
 python -m betbot --matches 10 --no-flashscore
 ```
 
-Options utiles : `--model`, `--base-url`, `--temperature`, `--output`, `--no-cache`, `-v`.
+Options utiles : `--model`, `--base-url`, `--api-key`, `--temperature`, `--output`,
+`--no-cache`, `-v`.
 
 ### Cotes et matchs réellement pariables
 
