@@ -26,6 +26,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from betbot.config import USER_AGENT, ScrapeConfig
+from betbot.poisson import FIRST_HALF_BTTS
 
 log = logging.getLogger(__name__)
 
@@ -64,9 +65,17 @@ DETAIL_MARKET_TITLES = re.compile(
     r"|double chance"
     r"|les 2 equipes marqueront.*"
     r"|resultat et les deux equipes marquent"
-    r"|double chance et les 2 equipes marquent)"
+    r"|double chance et les 2 equipes marquent"
+    r"|plus / moins buts"
+    r"|resultat et plus/moins buts"
+    r"|double chance et plus/moins buts)"
     r" - 90 mins$"
 )
+# Les deux equipes marquent par periode : une carte a part, dont la premiere colonne
+# porte la premiere mi-temps et la seconde la deuxieme.
+HALF_BTTS_TITLE = re.compile(r"^les 2 equipes marqueront elles \? - periodes$")
+# Seuil de buts en fin de libelle : « Plus 2.5 », « et moins de 1,5 buts ».
+GOALS_CLAUSE = re.compile(r"\b(plus|moins)\s+(?:de\s+)?(\d)[.,](\d)\s*(?:buts?)?$")
 # Doubles chances : la paire de signes, triee, donne le nom du marche.
 DOUBLE_CHANCE = {("1", "N"): "1N", ("1", "2"): "12", ("2", "N"): "N2"}
 
@@ -175,10 +184,18 @@ def market_name(label: str, home: str, away: str) -> str | None:
     « Nul / 2 et Oui » devient « N2 et oui », « FK RFS / Non » devient « 2 et non ».
     Retourne None pour les libelles sans equivalent dans le modele.
     """
-    pieces = re.split(r"\s*/\s*|\s+et\s+", deaccent(label))
+    text = deaccent(label)
+    goals = None
+    found = GOALS_CLAUSE.search(text)
+    if found:
+        side, units, tenths = found.groups()
+        goals = f"{side} de {units}.{tenths} buts"
+        text = text[: found.start()]
+
+    pieces = re.split(r"\s*/\s*|\s+et\s+", text)
     parts = [part.strip() for part in pieces if part.strip()]
     if not parts:
-        return None
+        return goals.capitalize() if goals else None
 
     btts = None
     if parts[-1] in YES_LABELS | NO_LABELS:
@@ -190,7 +207,10 @@ def market_name(label: str, home: str, away: str) -> str | None:
         return None
 
     if not signs:
-        return f"Les deux marquent : {btts}" if btts else None
+        if not btts:
+            return None
+        both = f"Les deux marquent : {btts}"
+        return f"{both} et {goals}" if goals else both
     if len(signs) == 1:
         base = signs[0]
     elif len(signs) == 2:
@@ -200,7 +220,8 @@ def market_name(label: str, home: str, away: str) -> str | None:
 
     if not base:
         return None
-    return f"{base} et {btts}" if btts else base
+    suffix = btts or goals
+    return f"{base} et {suffix}" if suffix else base
 
 
 def parse_event_markets(html: str, home: str, away: str) -> dict[str, float]:
@@ -215,7 +236,15 @@ def parse_event_markets(html: str, home: str, away: str) -> dict[str, float]:
 
     for card in soup.select("div.psel-market-card"):
         title = card.select_one(".psel-title-market__label")
-        if not title or not DETAIL_MARKET_TITLES.match(deaccent(title.get_text(strip=True))):
+        if not title:
+            continue
+        heading = deaccent(title.get_text(strip=True))
+        if HALF_BTTS_TITLE.match(heading):
+            price = _first_half_btts(card)
+            if price:
+                odds[FIRST_HALF_BTTS] = price
+            continue
+        if not DETAIL_MARKET_TITLES.match(heading):
             continue
 
         for outcome in card.select("psel-outcome"):
@@ -236,6 +265,21 @@ def parse_event_markets(html: str, home: str, away: str) -> dict[str, float]:
 
 def _price_text(node) -> float | None:
     return _price(node.get_text(strip=True)) if node else None
+
+
+def _first_half_btts(card) -> float | None:
+    """Cote du « oui » de premiere periode, premiere colonne de la ligne « Oui »."""
+    for row in card.select("tr"):
+        header = row.select_one("th")
+        if not header or deaccent(header.get_text(strip=True)) not in YES_LABELS:
+            continue
+        prices = [
+            price
+            for outcome in row.select("psel-outcome")
+            if (price := _price_text(outcome.select_one(".psel-outcome__data"))) is not None
+        ]
+        return prices[0] if prices else None
+    return None
 
 
 _session: requests.Session | None = None

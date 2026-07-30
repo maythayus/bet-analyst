@@ -16,6 +16,8 @@ LEAGUE_AVG_GOALS = 1.35  # buts moyens par equipe et par match (championnats eur
 HOME_ADVANTAGE = 1.15
 MAX_GOALS = 8
 SHRINKAGE = 5.0  # pseudo-matchs de regularisation : 5 matchs ne suffisent pas a estimer une force
+# Part des buts inscrits avant la pause : les equipes marquent moins en premiere periode.
+FIRST_HALF_SHARE = 0.45
 
 
 # Marches proposes par les bookmakers francais, exprimes comme un predicat sur le
@@ -42,6 +44,51 @@ COMBINED_MARKETS: dict[str, Callable[[int, int, bool], bool]] = {
     "12 et non": lambda h, a, btts: h != a and not btts,
     "N2 et non": lambda h, a, btts: h <= a and not btts,
 }
+
+# Seuils de buts proposes par Unibet en temps reglementaire.
+GOAL_LINES = (0.5, 1.5, 2.5, 3.5, 4.5)
+# Issues combinables avec un seuil de buts, comme le fait le bookmaker.
+_RESULTS: dict[str, Callable[[int, int], bool]] = {
+    "1": lambda h, a: h > a,
+    "N": lambda h, a: h == a,
+    "2": lambda h, a: h < a,
+    "1N": lambda h, a: h >= a,
+    "12": lambda h, a: h != a,
+    "N2": lambda h, a: h <= a,
+}
+
+
+def _goals_markets() -> dict[str, Callable[[int, int, bool], bool]]:
+    """Marches de buts : « Plus de 2.5 buts », « 1N et moins de 3.5 buts »..."""
+    sides: dict[str, Callable[[int, float], bool]] = {
+        "Plus": lambda total, line: total > line,
+        "Moins": lambda total, line: total < line,
+    }
+    markets: dict[str, Callable[[int, int, bool], bool]] = {}
+    for line in GOAL_LINES:
+        for side, goals in sides.items():
+            markets[f"{side} de {line} buts"] = (
+                lambda h, a, _btts, ln=line, test=goals: test(h + a, ln)
+            )
+            for name, result in _RESULTS.items():
+                markets[f"{name} et {side.lower()} de {line} buts"] = (
+                    lambda h, a, _btts, ln=line, test=goals, keep=result: keep(h, a)
+                    and test(h + a, ln)
+                )
+            markets[f"Les deux marquent : oui et {side.lower()} de {line} buts"] = (
+                lambda h, a, btts, ln=line, test=goals: btts and test(h + a, ln)
+            )
+            markets[f"Les deux marquent : non et {side.lower()} de {line} buts"] = (
+                lambda h, a, btts, ln=line, test=goals: not btts and test(h + a, ln)
+            )
+    return markets
+
+
+COMBINED_MARKETS.update(_goals_markets())
+
+# Marche de mi-temps : le modele ne convole que le score final, la premiere periode est
+# estimee a part avec des buts attendus reduits.
+FIRST_HALF_BTTS = "Les deux marquent : oui (1re mi-temps)"
 
 
 def _poisson_pmf(k: int, lam: float) -> float:
@@ -118,6 +165,13 @@ def compute(stats: MatchStats) -> PoissonResult | None:
 
     def percent(value: float) -> float:
         return round(100 * value, 2)
+
+    # Les deux equipes marquent avant la pause : produit des probabilites de marquer au
+    # moins une fois sur une periode, buts attendus reduits a leur part de premiere mi-temps.
+    half_btts = (1 - exp(-lambda_home * FIRST_HALF_SHARE)) * (
+        1 - exp(-lambda_away * FIRST_HALF_SHARE)
+    )
+    combined[FIRST_HALF_BTTS] = half_btts
 
     return PoissonResult(
         prob_home=percent(prob_home),

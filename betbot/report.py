@@ -6,7 +6,13 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from betbot.combo import Ticket
+from betbot.combo import (
+    MAX_LEG_VALUE,
+    MIN_LEG_PROBABILITY,
+    VALUE_TICKET_SIZES,
+    Ticket,
+    build_value_ticket,
+)
 from betbot.models import Analysis, MatchBundle, implied_from_odds
 
 DISCLAIMER = (
@@ -90,8 +96,12 @@ def _odds_block(bundle: MatchBundle) -> str:
     return "\n".join(rows)
 
 
-def _markets_block(bundle: MatchBundle, *, top: int = 8) -> str:
-    """Marches classes par probabilite, avec la cote minimale a exiger."""
+def _markets_block(bundle: MatchBundle, *, top: int = 12) -> str:
+    """Marches classes par probabilite, avec la cote minimale a exiger.
+
+    Le modele calcule plus de cent marches, dont beaucoup d'evidences invendables
+    (« plus de 0.5 but ») : seuls ceux reellement cotes sont affiches quand il y en a.
+    """
     if not bundle.poisson or not bundle.poisson.markets:
         return ""
 
@@ -100,7 +110,12 @@ def _markets_block(bundle: MatchBundle, *, top: int = 8) -> str:
         "| Marche | Proba modele | Cote equitable | Cote dispo | Valeur |",
         "| --- | --- | --- | --- | --- |",
     ]
-    ranked = sorted(bundle.poisson.markets.items(), key=lambda item: item[1], reverse=True)
+    priced = {
+        market: probability
+        for market, probability in bundle.poisson.markets.items()
+        if available.get(market)
+    }
+    ranked = sorted((priced or bundle.poisson.markets).items(), key=lambda i: i[1], reverse=True)
     for market, probability in ranked[:top]:
         if probability <= 0:
             continue
@@ -149,8 +164,15 @@ def _selection_block(bundles: list[MatchBundle]) -> str:
         opportunities = bundle.opportunities()
         if not opportunities:
             continue
+        # Une valeur enorme sur un gros outsider trahit presque toujours une faiblesse du
+        # modele : on privilegie les selections plausibles, jouables telles quelles.
+        playable = [
+            item
+            for item in opportunities
+            if item[2] >= MIN_LEG_PROBABILITY and item[3] <= MAX_LEG_VALUE
+        ]
         found = True
-        market, odds, probability, value = opportunities[0]
+        market, odds, probability, value = (playable or opportunities)[0]
         rows.append(
             f"| {bundle.label} | {market} | {odds:.2f} | {probability:.1f} % | {value:+.1f} % |"
         )
@@ -221,6 +243,50 @@ def _ticket_block(ticket: Ticket, stake: float = 10.0) -> str:
     return "\n".join(rows)
 
 
+def value_tickets(bundles: list[MatchBundle]) -> list[Ticket]:
+    """Combines longs a marches melanges, un par taille proposee."""
+    tickets = (build_value_ticket(bundles, legs=size) for size in VALUE_TICKET_SIZES)
+    return [ticket for ticket in tickets if ticket and ticket.legs]
+
+
+def _ticket_to_dict(ticket: Ticket, stake: float = 10.0) -> dict:
+    return {
+        "selections": [
+            {
+                "coup_denvoi": leg.kickoff,
+                "match": leg.match,
+                "marche": leg.market,
+                "probabilite_modele": leg.probability,
+                "cote_equitable": leg.fair_odds,
+                "cote_disponible": leg.odds,
+            }
+            for leg in ticket.legs
+        ],
+        "a_valider_avant": ticket.deadline,
+        "probabilite_estimee": ticket.probability,
+        "une_fois_sur": ticket.one_in,
+        "cote_equitable": ticket.fair_odds,
+        "cote_disponible": ticket.odds,
+        "valeur_theorique": ticket.value,
+        "mise": stake,
+        "gain_potentiel": ticket.payout(stake),
+    }
+
+
+def _value_tickets_block(bundles: list[MatchBundle]) -> list[str]:
+    """Combines longs, marches melanges, classes du plus probable au plus gros gain."""
+    parts: list[str] = []
+    for ticket in value_tickets(bundles):
+        parts += [
+            f"## Combine {len(ticket.legs)} selections (marches melanges)",
+            _ticket_block(ticket),
+            "",
+            "---",
+            "",
+        ]
+    return parts
+
+
 def build_markdown(
     pairs: list[tuple[MatchBundle, Analysis | None]], ticket: Ticket | None = None
 ) -> str:
@@ -235,6 +301,8 @@ def build_markdown(
             "---",
             "",
         ]
+
+    parts += _value_tickets_block([bundle for bundle, _ in pairs])
 
     selection = _selection_block([bundle for bundle, _ in pairs])
     if selection:
@@ -273,13 +341,18 @@ def write_report(
     markdown_path = output_dir / f"rapport-{stamp}.md"
     markdown_path.write_text(build_markdown(pairs, ticket), encoding="utf-8")
 
+    bundles = [bundle for bundle, _ in pairs]
+    tickets = ([ticket] if ticket and ticket.legs else []) + value_tickets(bundles)
     json_path = output_dir / f"donnees-{stamp}.json"
     json_path.write_text(
         json.dumps(
-            [
-                {"data": bundle.to_dict(), "analysis": analysis.markdown if analysis else None}
-                for bundle, analysis in pairs
-            ],
+            {
+                "matchs": [
+                    {"data": bundle.to_dict(), "analysis": analysis.markdown if analysis else None}
+                    for bundle, analysis in pairs
+                ],
+                "combines": [_ticket_to_dict(item) for item in tickets],
+            },
             ensure_ascii=False,
             indent=2,
             default=str,

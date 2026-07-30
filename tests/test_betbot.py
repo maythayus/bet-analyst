@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betbot import demo, poisson
-from betbot.combo import build_ticket
+from betbot.combo import build_ticket, build_value_ticket
 from betbot.config import AppConfig, ScrapeConfig
 from betbot.models import BookmakerLine, ForebetPrediction, MatchBundle
 from betbot.pipeline import build_bundles, filter_predictions, predictions_from_odds
@@ -202,10 +203,23 @@ UNIBET_DETAIL = "".join(
             "Double chance et les 2 \u00e9quipes marquent - 90 Mins",
             [("Lyon / N et Oui", "2,10"), ("N / Rennes et Non", "4,80")],
         ),
-        # Marche sans equivalent dans le modele : doit etre ignore.
         _card("R\u00e9sultat et Plus/Moins Buts - 90 Mins", [("Lyon et plus 1,5", "1,90")]),
-        # Mi-temps : le modele ne calcule que le temps reglementaire.
-        _card("Les 2 \u00e9quipes marqueront elles ? - 1\u00e8re Mi-Temps", [("Oui", "3,40")]),
+        _card(
+            "Plus / Moins Buts - 90 Mins",
+            [("Plus 2.5", "1,55"), ("Moins 2.5", "1,90")],
+            labelled=True,
+        ),
+        _card(
+            "Double chance et Plus/Moins Buts - 90 Mins",
+            [("Lyon / Nul et plus de 2.5 buts", "1,80")],
+        ),
+        # Les deux equipes marquent par periode : premiere colonne = premiere mi-temps.
+        _card(
+            "Les 2 \u00e9quipes marqueront elles ? - P\u00e9riodes",
+            [("Oui", "3,25"), ("Non", "1,15")],
+        ),
+        # Marche sans equivalent dans le modele : doit etre ignore.
+        _card("Buteurs - 90 Mins", [("Alexandre Lacazette", "2,50")]),
     ]
 )
 
@@ -230,9 +244,18 @@ class TestDetailedMarkets(unittest.TestCase):
         self.assertEqual(self.odds["1N et oui"], 2.10)
         self.assertEqual(self.odds["N2 et non"], 4.80)
 
+    def test_reads_goal_lines(self) -> None:
+        self.assertEqual(self.odds["Plus de 2.5 buts"], 1.55)
+        self.assertEqual(self.odds["Moins de 2.5 buts"], 1.90)
+        self.assertEqual(self.odds["1 et plus de 1.5 buts"], 1.90)
+        self.assertEqual(self.odds["1N et plus de 2.5 buts"], 1.80)
+
+    def test_reads_first_half_both_teams_to_score(self) -> None:
+        self.assertEqual(self.odds[poisson.FIRST_HALF_BTTS], 3.25)
+
     def test_ignores_markets_absent_from_the_model(self) -> None:
-        self.assertNotIn("1 et plus 1,5", self.odds)
-        self.assertEqual(len(self.odds), 10)
+        self.assertNotIn("Alexandre Lacazette", self.odds)
+        self.assertEqual(len(self.odds), 15)
 
     def test_every_market_read_exists_in_the_model(self) -> None:
         stats = demo.stats_for("Olympique Lyonnais", "Stade Rennais")
@@ -364,6 +387,49 @@ class TestCombo(unittest.TestCase):
 
     def test_unreachable_threshold_returns_no_ticket(self) -> None:
         self.assertIsNone(build_ticket(self.bundles, legs=2, min_probability=99.9))
+
+
+class TestValueTicket(unittest.TestCase):
+    """Combines longs a marches melanges, batis sur les cotes reellement disponibles."""
+
+    def _bundles(self, count: int) -> list[MatchBundle]:
+        template = demo.stats_for("Olympique Lyonnais", "Stade Rennais")
+        assert template is not None
+        bundles = []
+        for index in range(count):
+            stats = replace(
+                template,
+                home_team=f"Equipe {index}",
+                kickoff=f"2026-07-26 1{index}:00",
+            )
+            bundles.append(
+                MatchBundle(
+                    stats=stats,
+                    poisson=poisson.compute(stats),
+                    bookmakers=[
+                        BookmakerLine(
+                            bookmaker="Unibet",
+                            odds={"1": 1.80, "X": 3.60, "2": 4.20, "1N": 1.25, "12": 1.20},
+                        )
+                    ],
+                )
+            )
+        return bundles
+
+    def test_takes_one_priced_selection_per_match(self) -> None:
+        ticket = build_value_ticket(self._bundles(6), legs=6)
+        assert ticket is not None
+        self.assertEqual(len(ticket.legs), 6)
+        self.assertEqual(len({leg.match for leg in ticket.legs}), 6)
+        self.assertTrue(all(leg.odds for leg in ticket.legs))
+
+    def test_rejects_legs_the_model_judges_unlikely(self) -> None:
+        ticket = build_value_ticket(self._bundles(6), legs=6, min_leg_probability=60.0)
+        assert ticket is not None
+        self.assertTrue(all(leg.probability >= 60.0 for leg in ticket.legs))
+
+    def test_returns_nothing_without_enough_priced_matches(self) -> None:
+        self.assertIsNone(build_value_ticket(self._bundles(3), legs=8))
 
 
 class TestFlashscoreSearch(unittest.TestCase):

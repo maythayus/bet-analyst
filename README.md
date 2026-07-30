@@ -319,13 +319,40 @@ Lyon vs Rennes;1N et oui;2.35
 python -m betbot --matches 20 --only-bettable --odds-csv cotes.csv
 ```
 
+### Combinés 6 et 8 sélections
+
+À la suite du ticket `--combo`, le rapport ajoute automatiquement deux combinés longs à
+**marchés mélangés** : 6 puis 8 sélections, une seule par match (les issues d'une même
+rencontre ne se combinent pas chez le bookmaker). Chaque sélection est prise parmi les
+marchés **réellement cotés** chez Unibet — double chance, « les deux équipes marquent »
+oui/non, plus/moins de buts, résultat + buts, BTTS 1re mi-temps — et retenue sur la
+meilleure espérance `cote × probabilité`, en écartant :
+
+- les sélections que le modèle juge à moins de 55 % ;
+- celles dont l'écart au marché dépasse +25 %, qui trahissent presque toujours une
+  faiblesse du modèle (équipe mal identifiée, statistiques absentes) plutôt qu'une
+  aubaine.
+
+Chaque combiné affiche l'heure limite de validation, la probabilité estimée, la cote
+cumulée, la cote équitable, la valeur théorique et le gain pour 10 EUR misés. Ces mêmes
+chiffres sont repris dans le JSON, clé `combines`.
+
+> Un combiné de 8 sélections à ~60 % chacune ne passe qu'environ **une fois sur 40** : le
+> gain affiché est une projection mathématique, pas un gain « réalisable ». Le calcul
+> suppose de plus les matchs indépendants, ce qu'ils ne sont jamais totalement, et le
+> bookmaker dispose de plus de données que ce modèle.
+
 ### Marchés calculés
 
 À partir de la matrice des scores exacts, le modèle donne la probabilité de chaque
 marché courant : `1`, `N`, `2`, doubles chances `1N` / `12` / `N2`, « les deux équipes
-marquent » oui/non, et les combinés `1N et oui`, `12 et oui`, `N2 et oui`, `1N et non`…
-Le rapport affiche pour chacun la **cote équitable** (celle en dessous de laquelle le
-pari perd de l'argent si le modèle a raison) et la compare à la cote proposée.
+marquent » oui/non, les combinés `1N et oui`, `12 et oui`, `N2 et oui`, `1N et non`…, les
+seuils de buts `Plus de 2.5 buts` / `Moins de 2.5 buts` (de 0.5 à 4.5) et leurs
+croisements `1N et plus de 2.5 buts`, `Les deux marquent : oui et plus de 2.5 buts`,
+ainsi que « les deux marquent » sur la **1re mi-temps** (estimée avec 45 % des buts
+attendus). Le rapport affiche pour chacun la **cote équitable** (celle en dessous de
+laquelle le pari perd de l'argent si le modèle a raison) et la compare à la cote
+proposée.
 
 ### Forebet : enregistrer la page à la main (Ctrl+S)
 

@@ -15,6 +15,16 @@ from betbot.models import MatchBundle
 # Chez les bookmakers le nul s'ecrit X, dans le modele il s'ecrit N.
 _SIGN_TO_MARKET = {"X": "N"}
 
+# Tailles de combines proposees en fin de rapport, en plus du ticket principal.
+VALUE_TICKET_SIZES = (6, 8)
+# Une selection a moins d'une chance sur deux n'a rien a faire dans un combine long :
+# huit selections a 50 % ne passent qu'une fois sur 256.
+MIN_LEG_PROBABILITY = 55.0
+# Au-dela de cet ecart avec le marche, l'explication la plus probable n'est pas une
+# aubaine mais une erreur du modele (equipe mal identifiee, statistiques manquantes) :
+# ces selections sont ecartees des combines plutot que recherchees.
+MAX_LEG_VALUE = 25.0
+
 
 @dataclass
 class Leg:
@@ -96,14 +106,20 @@ def _best_selection(bundle: MatchBundle, market: str | None) -> Leg | None:
     prices = {
         _SIGN_TO_MARKET.get(sign, sign): value for sign, value in bundle.best_odds().items()
     }
-    candidates = bundle.poisson.markets
     if market:
-        probability = candidates.get(market)
+        probability = bundle.poisson.markets.get(market)
         if probability is None:
             return None
         return Leg(bundle.label, market, probability, prices.get(market), bundle.stats.kickoff)
 
-    name, probability = max(candidates.items(), key=lambda item: item[1])
+    # Sans marche impose, seuls les marches cotes ont un interet : le modele en calcule
+    # aussi des evidences invendables comme « plus de 0.5 but ».
+    priced = {
+        name: probability
+        for name, probability in bundle.poisson.markets.items()
+        if prices.get(name)
+    }
+    name, probability = max((priced or bundle.poisson.markets).items(), key=lambda item: item[1])
     return Leg(bundle.label, name, probability, prices.get(name), bundle.stats.kickoff)
 
 
@@ -134,7 +150,62 @@ def build_ticket(
         if len(ticket.legs) < 2:
             return None
 
-    # Les selections sont choisies par probabilite, puis affichees dans l'ordre des
-    # coups d'envoi : c'est ainsi qu'on les suit, et le premier donne l'heure limite.
+    return _chronological(ticket)
+
+
+def _chronological(ticket: Ticket) -> Ticket:
+    """Selections rangees par coup d'envoi : c'est ainsi qu'on les suit sur le ticket,
+    et la premiere donne l'heure limite de validation."""
     ticket.legs.sort(key=lambda leg: (leg.kickoff is None, leg.kickoff or ""))
     return ticket
+
+
+def _leg_value(leg: Leg) -> float:
+    """Esperance de gain par euro mise, en pourcentage, si le modele a raison."""
+    return 100 * ((leg.odds or 0) * leg.probability / 100 - 1)
+
+
+def _priced_selections(
+    bundle: MatchBundle, min_probability: float, max_value: float
+) -> list[Leg]:
+    """Marches cotes du match dont le modele juge la probabilite suffisante."""
+    if not bundle.poisson or not bundle.poisson.markets:
+        return []
+    prices = {
+        _SIGN_TO_MARKET.get(sign, sign): value for sign, value in bundle.best_odds().items()
+    }
+    legs = [
+        Leg(bundle.label, market, probability, odds, bundle.stats.kickoff)
+        for market, odds in prices.items()
+        if (probability := bundle.poisson.markets.get(market, 0.0)) >= min_probability
+    ]
+    return [leg for leg in legs if _leg_value(leg) <= max_value]
+
+
+def build_value_ticket(
+    bundles: list[MatchBundle],
+    *,
+    legs: int,
+    min_leg_probability: float = MIN_LEG_PROBABILITY,
+    max_leg_value: float = MAX_LEG_VALUE,
+) -> Ticket | None:
+    """Combine de `legs` selections cotees maximisant le gain espere.
+
+    Tous les marches sont melanges (double chance, les deux marquent, seuils de buts,
+    mi-temps) et une seule selection est prise par match, les issues d'une meme
+    rencontre n'etant pas combinables chez le bookmaker. L'esperance d'un combine est
+    le produit des `cote x probabilite` de ses selections : la maximiser revient a
+    retenir les selections dont ce produit est le plus grand, une fois ecartees celles
+    dont le modele juge la probabilite trop faible ou dont l'ecart au marche est trop
+    beau pour etre vrai.
+    """
+    best_per_match: list[Leg] = []
+    for bundle in bundles:
+        selections = _priced_selections(bundle, min_leg_probability, max_leg_value)
+        if selections:
+            best_per_match.append(max(selections, key=_leg_value))
+
+    if len(best_per_match) < legs:
+        return None
+    best_per_match.sort(key=_leg_value, reverse=True)
+    return _chronological(Ticket(best_per_match[:legs]))
