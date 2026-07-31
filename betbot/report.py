@@ -8,12 +8,15 @@ from pathlib import Path
 
 from betbot.combo import (
     MAX_LEG_VALUE,
+    MIN_LEG_ODDS,
     MIN_LEG_PROBABILITY,
     VALUE_TICKET_SIZES,
     Ticket,
     build_value_ticket,
+    kelly_share,
 )
 from betbot.models import Analysis, MatchBundle, implied_from_odds
+from betbot.poisson import SOURCE_FORM
 
 DISCLAIMER = (
     "> Rapport genere automatiquement a partir de Forebet, Flashscore, d'un modele de "
@@ -57,10 +60,35 @@ def _probability_table(bundle: MatchBundle) -> str:
         )
     if poisson:
         rows.append(
-            f"| Poisson | {fmt(poisson.prob_home)} | {fmt(poisson.prob_draw)} | "
+            f"| Poisson ({poisson.source}) | {fmt(poisson.prob_home)} | {fmt(poisson.prob_draw)} | "
             f"{fmt(poisson.prob_away)} | {fmt(poisson.prob_over_25)} | {fmt(poisson.prob_btts)} |"
         )
+        rows += ["", _model_note(bundle)]
     return "\n".join(rows) if len(rows) > 2 else "_Aucune probabilite disponible._"
+
+
+def _model_note(bundle: MatchBundle) -> str:
+    """Origine des buts attendus et fiabilite associee."""
+    poisson = bundle.poisson
+    if not poisson:
+        return ""
+    goals = (
+        f"Buts attendus : {poisson.expected_home_goals:.2f} - "
+        f"{poisson.expected_away_goals:.2f} (score le plus probable {poisson.most_likely_score})."
+    )
+    if poisson.source == SOURCE_FORM:
+        return (
+            f"_{goals} **Aucune cote pour caler le modele** : l'estimation ne repose que "
+            "sur cinq matchs de forme, sans tenir compte du niveau des adversaires "
+            "rencontres. A traiter comme un ordre de grandeur, pas comme une probabilite._"
+        )
+    gap = poisson.calibration_gap
+    calibration = f" Ecart maximal aux marches cotes : {gap:.1f} pts." if gap is not None else ""
+    return (
+        f"_{goals} Modele cale sur les cotes ({poisson.source}), marge du bookmaker "
+        f"retiree.{calibration} Un ecart avec le marche vient de la forme recente, "
+        "volontairement bornee : le marche en sait davantage._"
+    )
 
 
 def _odds_block(bundle: MatchBundle) -> str:
@@ -190,10 +218,10 @@ def _form_block(bundle: MatchBundle) -> str:
 def _selection_block(bundles: list[MatchBundle]) -> str:
     """Recapitulatif en tete de rapport : le meilleur marche cote de chaque match."""
     rows = [
-        "| Match | Marche | Cote | Proba modele | Valeur |",
-        "| --- | --- | --- | --- | --- |",
+        "| Match | Marche | Cote | Proba modele | Valeur | Mise conseillee |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
-    found = False
+    found = positive = False
     for bundle in bundles:
         opportunities = bundle.opportunities()
         if not opportunities:
@@ -203,21 +231,34 @@ def _selection_block(bundles: list[MatchBundle]) -> str:
         playable = [
             item
             for item in opportunities
-            if item[2] >= MIN_LEG_PROBABILITY and item[3] <= MAX_LEG_VALUE
+            if item[1] >= MIN_LEG_ODDS
+            and item[2] >= MIN_LEG_PROBABILITY
+            and item[3] <= MAX_LEG_VALUE
         ]
         found = True
         market, odds, probability, value = (playable or opportunities)[0]
+        share = kelly_share(probability, odds)
+        positive = positive or share > 0
+        stake = f"{100 * share:.1f} % du capital" if share else "ne pas jouer"
         rows.append(
-            f"| {bundle.label} | {market} | {odds:.2f} | {probability:.1f} % | {value:+.1f} % |"
+            f"| {bundle.label} | {market} | {odds:.2f} | {probability:.1f} % | "
+            f"{value:+.1f} % | {stake} |"
         )
     if not found:
         return ""
     rows += [
         "",
-        "_Valeur = esperance de gain par euro mise si le modele a raison. En dessous de "
-        "+5 %, l'ecart est dans le bruit du modele ; au-dessus de +20 %, suspecte plutot "
-        "une donnee manquante ou une equipe mal identifiee qu'une aubaine._",
+        "_Valeur = esperance de gain par euro mise si le modele a raison. La mise "
+        "conseillee applique un quart du critere de Kelly, et vaut zero des que "
+        "l'esperance est negative : la marge du bookmaker rend ce cas le plus frequent._",
     ]
+    if not positive:
+        rows.append(
+            "\n**Aucune selection a esperance positive aujourd'hui.** Le modele etant cale "
+            "sur les cotes, il ne trouve d'ecart que la ou la forme recente contredit le "
+            "marche ; quand il n'en trouve aucun, s'abstenir est la decision qui rapporte "
+            "le plus."
+        )
     return "\n".join(rows)
 
 

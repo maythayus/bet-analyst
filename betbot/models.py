@@ -116,6 +116,13 @@ class PoissonResult:
     expected_away_goals: float
     most_likely_score: str
     markets: dict[str, float] = field(default_factory=dict)  # "1N et oui" -> probabilite en %
+    # Origine des buts attendus : "cotes", "cotes + forme" ou "forme seule". Une
+    # estimation issue de la forme seule porte sur cinq matchs sans tenir compte du
+    # niveau des adversaires : elle est nettement moins fiable.
+    source: str = "forme seule"
+    # Ecart maximal, en points, entre le modele et les marches sur lesquels il a ete
+    # cale. Vaut None quand aucune cote n'a servi de reference.
+    calibration_gap: float | None = None
 
 
 @dataclass
@@ -151,6 +158,14 @@ class MatchBundle:
                     best[sign] = value
         return best
 
+    def market_prices(self) -> dict[str, float]:
+        """Meilleures cotes, nommees comme les marches du modele (le nul s'ecrit N)."""
+        prices: dict[str, float] = {}
+        for sign, odds in self.best_odds().items():
+            market = "N" if sign == "X" else sign
+            prices[market] = max(odds, prices.get(market, 0))
+        return prices
+
     def opportunities(
         self, odds_range: tuple[float, float] | None = None
     ) -> list[tuple[str, float, float, float]]:
@@ -162,11 +177,7 @@ class MatchBundle:
         """
         if not self.poisson or not self.poisson.markets:
             return []
-        prices: dict[str, float] = {}
-        for sign, odds in self.best_odds().items():
-            market = "N" if sign == "X" else sign  # le nul s'ecrit X chez les bookmakers
-            prices[market] = max(odds, prices.get(market, 0))
-
+        prices = self.market_prices()
         found: list[tuple[str, float, float, float]] = []
         for market, odds in prices.items():
             probability = self.poisson.markets.get(market)

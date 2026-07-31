@@ -6,16 +6,24 @@ import sys
 import tempfile
 import unittest
 from dataclasses import replace
+from math import exp
 from pathlib import Path
+from typing import ClassVar
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betbot import demo, poisson
 from betbot.cli import discover_market_pages
-from betbot.combo import build_ticket, build_value_ticket
+from betbot.combo import build_ticket, build_value_ticket, kelly_share
 from betbot.config import AppConfig, ScrapeConfig
-from betbot.models import BookmakerLine, ForebetPrediction, MatchBundle
+from betbot.models import (
+    BookmakerLine,
+    ForebetPrediction,
+    MatchBundle,
+    MatchStats,
+    TeamForm,
+)
 from betbot.pipeline import (
     build_bundles,
     filter_predictions,
@@ -181,10 +189,69 @@ class TestPoisson(unittest.TestCase):
         result = poisson.compute(self.stats)
         self.assertGreater(result.prob_home, result.prob_away)
 
-    def test_returns_none_without_form(self) -> None:
+    def test_returns_none_without_form_nor_odds(self) -> None:
         stats = demo.stats_for("Getafe", "Athletic Bilbao")
         stats_without_form = type(stats)(home_team=stats.home_team, away_team=stats.away_team)
         self.assertIsNone(poisson.compute(stats_without_form))
+
+    def test_form_alone_is_flagged_as_such(self) -> None:
+        self.assertEqual(poisson.compute(self.stats).source, poisson.SOURCE_FORM)
+
+
+class TestMarketCalibration(unittest.TestCase):
+    """Le modele doit reproduire les probabilites du marche, marge retiree."""
+
+    ODDS: ClassVar[dict[str, float]] = {
+        "1": 3.70,
+        "N": 3.80,
+        "2": 1.70,
+        "Les deux marquent : oui": 1.45,
+    }
+
+    def test_devig_removes_the_margin(self) -> None:
+        probabilities = poisson.devig(self.ODDS, ("1", "N", "2"))
+        self.assertAlmostEqual(sum(probabilities.values()), 1.0, places=6)
+        self.assertLess(probabilities["1"], 1 / self.ODDS["1"])
+
+    def test_devig_needs_every_outcome(self) -> None:
+        self.assertIsNone(poisson.devig({"1": 2.0}, ("1", "N", "2")))
+
+    def test_fitted_model_matches_the_market(self) -> None:
+        target = poisson.devig(self.ODDS, ("1", "N", "2"))
+        result = poisson.compute(MatchStats(home_team="A", away_team="B"), self.ODDS)
+        self.assertEqual(result.source, poisson.SOURCE_MARKET)
+        for outcome, probability in target.items():
+            self.assertAlmostEqual(result.markets[outcome], 100 * probability, delta=2.0)
+        self.assertLess(result.calibration_gap, 3.0)
+
+    def test_odds_override_a_contradicting_form(self) -> None:
+        """Cinq matchs de forme ne doivent pas renverser un favori du marche.
+
+        Cas reel : Coleraine, prolifique dans son championnat, donne gagnant a 70 % par
+        l'ancien modele face a HJK Helsinki, quand le marche le donnait a 24 %.
+        """
+        prolific = TeamForm(
+            name="Coleraine",
+            last_results=["W"] * 5,
+            goals_for=13,
+            goals_against=8,
+            matches_played=5,
+        )
+        modest = TeamForm(
+            name="HJK", last_results=["W", "W", "L"], goals_for=5, goals_against=9, matches_played=3
+        )
+        stats = MatchStats(
+            home_team="Coleraine", away_team="HJK", home_form=prolific, away_form=modest
+        )
+        result = poisson.compute(stats, self.ODDS)
+        self.assertLess(result.markets["1"], 40.0)
+        self.assertLess(result.expected_home_goals, 2.0)
+
+    def test_dixon_coles_adds_weight_to_the_goalless_draw(self) -> None:
+        """Deux Poisson independantes sous-estiment le 0-0, donc le « BTTS non »."""
+        matrix = poisson.score_matrix(1.3, 1.1)
+        self.assertGreater(matrix[0][0], exp(-1.3) * exp(-1.1))
+        self.assertAlmostEqual(sum(sum(row) for row in matrix), 1.0, places=6)
 
 
 class TestCombinedMarkets(unittest.TestCase):
@@ -442,16 +509,30 @@ class TestOpportunities(unittest.TestCase):
             bookmakers=[BookmakerLine(bookmaker="Unibet", odds={"1": 1.80, "X": 3.60, "2": 4.20})],
         )
 
-    def test_value_is_positive_when_model_beats_the_price(self) -> None:
+    def test_value_follows_the_price_and_the_model(self) -> None:
         bundle = self._bundle()
-        market, odds, probability, value = bundle.opportunities()[0]
-        self.assertEqual(market, "1")
-        self.assertAlmostEqual(value, 100 * (odds * probability / 100 - 1), places=1)
-        self.assertGreater(value, 0)
+        opportunities = bundle.opportunities()
+        for _market, odds, probability, value in opportunities:
+            self.assertAlmostEqual(value, 100 * (odds * probability / 100 - 1), places=1)
+        self.assertEqual(opportunities, sorted(opportunities, key=lambda i: -i[3]))
 
     def test_range_excludes_prices_outside_the_window(self) -> None:
         markets = {item[0] for item in self._bundle().opportunities((1.65, 1.95))}
         self.assertEqual(markets, {"1"})
+
+
+class TestKelly(unittest.TestCase):
+    def test_no_stake_without_an_edge(self) -> None:
+        self.assertEqual(kelly_share(50.0, 1.90), 0.0)
+        self.assertEqual(kelly_share(90.0, 1.0), 0.0)
+
+    def test_stake_grows_with_the_edge(self) -> None:
+        small = kelly_share(55.0, 1.90)
+        large = kelly_share(65.0, 1.90)
+        self.assertGreater(small, 0)
+        self.assertGreater(large, small)
+        # Un quart de Kelly : (p * cote - 1) / (cote - 1) / 4 pour 65 % a 1.90.
+        self.assertAlmostEqual(large, 0.25 * (0.65 * 1.90 - 1) / 0.90, places=6)
 
 
 class TestCombo(unittest.TestCase):
@@ -622,7 +703,7 @@ class TestPipelineOffline(unittest.TestCase):
 
         markdown = build_markdown([(bundle, None) for bundle in bundles])
         self.assertIn("Olympique Lyonnais vs Stade Rennais", markdown)
-        self.assertIn("| Poisson |", markdown)
+        self.assertIn("| Poisson (", markdown)
 
 
 if __name__ == "__main__":

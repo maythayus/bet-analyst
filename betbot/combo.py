@@ -24,6 +24,29 @@ MIN_LEG_PROBABILITY = 55.0
 # aubaine mais une erreur du modele (equipe mal identifiee, statistiques manquantes) :
 # ces selections sont ecartees des combines plutot que recherchees.
 MAX_LEG_VALUE = 25.0
+# En dessous de cette cote, l'issue est une quasi-certitude que le bookmaker vend a
+# perte de temps (« plus de 0.5 but » a 1.03) : elle occupe la premiere place du
+# classement par valeur sans rien rapporter.
+MIN_LEG_ODDS = 1.20
+# Fraction du critere de Kelly appliquee aux mises conseillees. Kelly plein maximise la
+# croissance du capital si les probabilites sont exactes ; elles ne le sont jamais, et
+# une surestimation ruine le joueur. Le quart de Kelly est l'usage prudent.
+KELLY_FRACTION = 0.25
+
+
+def kelly_share(probability: float, odds: float | None) -> float:
+    """Part de capital a miser sur une issue, en fraction de 1, quart de Kelly.
+
+    Vaut 0 des que le pari n'a pas d'esperance positive selon le modele : dans ce cas
+    la mise optimale est de ne pas jouer.
+    """
+    if not odds or odds <= 1:
+        return 0.0
+    chance = probability / 100
+    edge = chance * odds - 1
+    if edge <= 0:
+        return 0.0
+    return KELLY_FRACTION * edge / (odds - 1)
 
 
 @dataclass
@@ -168,7 +191,12 @@ def _leg_value(leg: Leg) -> float:
 def _priced_selections(
     bundle: MatchBundle, min_probability: float, max_value: float
 ) -> list[Leg]:
-    """Marches cotes du match dont le modele juge la probabilite suffisante."""
+    """Marches cotes du match dont le modele juge la probabilite suffisante.
+
+    Les cotes trop basses sont ecartees : leur esperance est mecaniquement la moins
+    mauvaise du marche, ce qui les placerait en tete d'un classement par valeur sans
+    qu'elles rapportent quoi que ce soit.
+    """
     if not bundle.poisson or not bundle.poisson.markets:
         return []
     prices = {
@@ -177,7 +205,8 @@ def _priced_selections(
     legs = [
         Leg(bundle.label, market, probability, odds, bundle.stats.kickoff)
         for market, odds in prices.items()
-        if (probability := bundle.poisson.markets.get(market, 0.0)) >= min_probability
+        if odds >= MIN_LEG_ODDS
+        and (probability := bundle.poisson.markets.get(market, 0.0)) >= min_probability
     ]
     return [leg for leg in legs if _leg_value(leg) <= max_value]
 

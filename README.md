@@ -18,8 +18,8 @@ Il **croise quatre sources** pour chaque rencontre pariable :
    avis extérieur, pas comme une vérité. URLS pour le fichiers Forebet.htm = https://www.forebet.com/en/football-tips-and-predictions-for-today/predictions-both-to-score
 2. **Flashscore** — les statistiques brutes : cinq derniers matchs de chaque équipe,
    buts marqués et encaissés, confrontations directes.
-3. **Modèle de Poisson** — un calcul maison, indépendant des deux précédents, qui
-   déduit de ces statistiques la probabilité de chaque marché.
+3. **Modèle de Poisson** — un calcul maison qui déduit la probabilité de chaque marché
+   d'une matrice de scores exacts (voir [Le modèle](#le-modèle-poisson)).
 4. **Unibet** — les cotes réellement proposées : 1 N 2 du listing, puis « les deux
    équipes marquent », doubles chances et combinés lus sur la page de chaque match.
 
@@ -30,6 +30,43 @@ est de commenter les désaccords entre sources — pas d'inventer un pronostic.
 Sont analysés **tous les matchs pariables**, c'est-à-dire ceux pour lesquels une cote
 Unibet existe (`--only-bettable`, ou `--from-unibet` pour partir directement de la
 grille des cotes).
+
+## Le modèle Poisson
+
+Le modèle construit une **matrice des scores exacts** (0-0 à 8-8) à partir de deux
+nombres : les buts attendus de chaque équipe. Toutes les probabilités affichées — 1 N 2,
+doubles chances, plus/moins de buts, « les deux marquent », marchés combinés — sont des
+sommes de cases de cette matrice, donc cohérentes entre elles par construction.
+
+Deux corrections par rapport à un Poisson d'école :
+
+- **Dixon-Coles** : deux lois de Poisson indépendantes sous-estiment les scores serrés
+  (0-0, 1-0, 0-1, 1-1). Le modèle leur rend leur poids, ce qui corrige surtout le
+  « les deux marquent : non », auparavant sous-estimé de près de 16 points.
+- **Calage sur les cotes** : quand un groupe d'issues exhaustif est coté (1 N 2, une
+  ligne de buts, BTTS oui/non), la marge du bookmaker est retirée puis les buts attendus
+  sont ajustés pour reproduire ces probabilités. La forme récente ne sert plus qu'à un
+  écart borné (25 % de poids, 12 % d'amplitude maximale).
+
+Chaque match indique donc l'origine de son estimation :
+
+| Source affichée | Signification |
+| --- | --- |
+| `cotes` | calée sur le marché, aucune donnée de forme exploitable |
+| `cotes + forme` | calée sur le marché, légèrement inclinée par la forme récente |
+| `forme seule` | **aucune cote pour caler le modèle** : ordre de grandeur, rien de plus |
+
+Pourquoi ce choix : mesuré sur 250 matchs de rapports réels, l'ancien modèle s'écartait
+des probabilités du marché de **11,5 points en moyenne**, avec des dérapages absurdes
+(Coleraine donné gagnant à 70 % contre HJK Helsinki quand le marché le donnait à 24 % ;
+résultat 0-3). Cinq matchs de forme, sans correction du niveau de la ligue ni de
+l'adversaire, ne suffisent pas à estimer une équipe. Le modèle recalé tombe à
+**2,2 points** d'écart moyen.
+
+La conséquence est à comprendre : **un modèle calé sur les cotes ne trouve presque
+jamais de pari à espérance positive**, puisqu'il reproduit le marché diminué de la
+marge. C'est le comportement attendu, pas un défaut. La mise conseillée affichée
+(quart du critère de Kelly) vaut donc « ne pas jouer » la plupart du temps.
 
 ### Ce que ça ne prouve pas
 
