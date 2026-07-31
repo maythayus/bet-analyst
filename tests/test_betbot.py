@@ -665,6 +665,30 @@ class TestFlashscoreSearch(unittest.TestCase):
             flashscore.score_candidate("Dynamo Minsk", "FC Minsk (Belarus)"),
         )
 
+    def test_reads_the_abbreviations_of_the_bookmaker(self) -> None:
+        """« Utd », « SL », « NY » : le bookmaker abrege, Flashscore ecrit en entier."""
+        self.assertEqual(
+            self._best("Cambrian Utd", ["Manchester Utd (England)", "Cambrian United (Wales)"]),
+            "Cambrian United (Wales)",
+        )
+        self.assertEqual(
+            self._best("Henan SL", ["Henan Songshan Longmen (China)", "Henanger (Norway)"]),
+            "Henan Songshan Longmen (China)",
+        )
+        self.assertEqual(
+            self._best("NY City FC", ["Manchester City (England)", "New York City (USA)"]),
+            "New York City (USA)",
+        )
+        # Une abreviation qui designerait deux mots du meme nom reste telle quelle.
+        self.assertLess(
+            flashscore.score_candidate("St Gilloise", "Saint Etienne (France)"),
+            flashscore.NAME_THRESHOLD,
+        )
+
+    def test_query_variants_spell_out_city_initials(self) -> None:
+        """La recherche ne renvoie rien sur « NY » : le sigle doit etre deplie."""
+        self.assertIn("new york City FC", flashscore.query_variants("NY City FC"))
+
     def test_translates_the_french_club_names(self) -> None:
         self.assertEqual(flashscore.alias("La Gantoise"), "Gent")
         self.assertIn("Gent", flashscore.query_variants("La Gantoise"))

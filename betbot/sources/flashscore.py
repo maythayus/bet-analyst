@@ -71,7 +71,9 @@ _ALIASES = {
     }.items()
 }
 
-# Transcriptions concurrentes d'un meme nom slave, d'un bookmaker a l'autre.
+# Transcriptions concurrentes d'un meme nom slave, d'un bookmaker a l'autre, et sigles
+# de villes qu'aucune regle ne deplie : « NY » ne ressemble pas a « New York », mais la
+# recherche Flashscore ne trouve rien sans l'ecrire en toutes lettres.
 _SPELLINGS = {
     "dynamo": "dinamo",
     "dinamo": "dynamo",
@@ -79,6 +81,8 @@ _SPELLINGS = {
     "kyiv": "kiev",
     "salonique": "thessaloniki",
     "saint": "st",
+    "ny": "new york",
+    "nyc": "new york city",
 }
 
 # Flashscore nomme les pays en anglais, les bookmakers francais en francais. La table ne
@@ -221,18 +225,53 @@ def _expanded(wanted: str, plain: str) -> tuple[str, str]:
     """Deux libelles ou chaque abreviation est remplacee par le mot complet d'en face.
 
     « Dyn. Kyiv » devient « Dynamo Kyiv » face a « Dynamo Kiev » : sans cela, un mot sur
-    deux concorde et le bon club passe sous le seuil.
+    deux concorde et le bon club passe sous le seuil. L'abreviation peut etre un debut
+    de mot (« Dyn. »), un mot contracte (« Utd » pour United) ou les initiales de
+    plusieurs mots (« SL » pour Songshan Longmen). Une abreviation qui pourrait designer
+    deux choses est laissee telle quelle plutot que devinee.
     """
 
     def grow(short: str, reference: str) -> str:
         words = reference.split()
         grown = []
         for word in short.split():
-            longer = [other for other in words if len(other) > len(word) and _starts(other, word)]
-            grown.append(longer[0] if len(word) <= ABBREVIATION_WORD and len(longer) == 1 else word)
+            expansions = _expansions(word, words) if len(word) <= ABBREVIATION_WORD else []
+            grown.append(expansions[0] if len(expansions) == 1 else word)
         return " ".join(grown)
 
     return grow(wanted, plain), grow(plain, wanted)
+
+
+def _expansions(short: str, words: list[str]) -> list[str]:
+    """Formes completes possibles d'une abreviation parmi les mots d'un autre nom."""
+    single = [word for word in words if len(word) > len(short) and _abbreviates(short, word)]
+    return single + _initial_runs(short, words)
+
+
+def _abbreviates(short: str, word: str) -> bool:
+    """« Dyn » et « Utd » abregent « Dynamo » et « United » : memes lettres, dans l'ordre."""
+    letters, target = normalise(short), normalise(word)
+    if not letters or not target.startswith(letters[0]):
+        return False
+    position = 0
+    for letter in letters:
+        position = target.find(letter, position) + 1
+        if position == 0:
+            return False
+    return True
+
+
+def _initial_runs(short: str, words: list[str]) -> list[str]:
+    """Suites de mots dont les initiales forment le sigle (« SL » : Songshan Longmen)."""
+    letters = normalise(short)
+    if len(letters) < 2:
+        return []
+    initials = [normalise(word)[:1] for word in words]
+    return [
+        " ".join(words[start : start + len(letters)])
+        for start in range(len(words) - len(letters) + 1)
+        if "".join(initials[start : start + len(letters)]) == letters
+    ]
 
 
 def _starts(word: str, prefix: str) -> bool:
