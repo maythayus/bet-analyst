@@ -135,12 +135,13 @@ def _best_selection(bundle: MatchBundle, market: str | None) -> Leg | None:
             return None
         return Leg(bundle.label, market, probability, prices.get(market), bundle.stats.kickoff)
 
-    # Sans marche impose, seuls les marches cotes ont un interet : le modele en calcule
-    # aussi des evidences invendables comme « plus de 0.5 but ».
+    # Sans marche impose, seuls les marches cotes ont un interet, et pas a n'importe
+    # quel prix : « plus de 0.5 but » a 1.02 est la selection la plus probable de
+    # n'importe quel match, et la moins interessante a jouer.
     priced = {
         name: probability
         for name, probability in bundle.poisson.markets.items()
-        if prices.get(name)
+        if prices.get(name, 0) >= MIN_LEG_ODDS
     }
     name, probability = max((priced or bundle.poisson.markets).items(), key=lambda item: item[1])
     return Leg(bundle.label, name, probability, prices.get(name), bundle.stats.kickoff)
