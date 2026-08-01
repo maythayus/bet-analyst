@@ -38,7 +38,19 @@ nombres : les buts attendus de chaque équipe. Toutes les probabilités affiché
 doubles chances, plus/moins de buts, « les deux marquent », marchés combinés — sont des
 sommes de cases de cette matrice, donc cohérentes entre elles par construction.
 
-Deux corrections par rapport à un Poisson d'école :
+Deux estimations de ces buts attendus sont disponibles, au choix (`--poisson`) :
+
+| Modèle | Ce qu'il fait | Ce qu'il donne |
+| --- | --- | --- |
+| `forme` (défaut) | deux lois de Poisson nourries par les cinq derniers matchs, les cotes ne servent qu'à mesurer l'écart | probabilités tranchées, beaucoup de valeur affichée, une partie étant de l'erreur d'estimation |
+| `marche` | matrice calée sur les cotes dont la marge a été retirée, forme en ajustement borné | reproduit le marché à ~2 points près, donc presque jamais de pari à espérance positive |
+
+Le modèle `forme` est celui des premières versions : c'est lui qui produit les combinés
+à forte cote. Le rapport affiche pour chaque match son **écart maximal au marché** ;
+au-delà d'une dizaine de points, cet écart mesure d'abord l'incertitude du modèle, pas
+une occasion. `--poisson marche` donne la lecture prudente du même match.
+
+Deux corrections disponibles par rapport à un Poisson d'école, actives sur `marche` :
 
 - **Dixon-Coles** : deux lois de Poisson indépendantes sous-estiment les scores serrés
   (0-0, 1-0, 0-1, 1-1). Le modèle leur rend leur poids, ce qui corrige surtout le
@@ -52,21 +64,30 @@ Chaque match indique donc l'origine de son estimation :
 
 | Source affichée | Signification |
 | --- | --- |
+| `forme recente` | modèle par défaut : cinq matchs de forme, sans référence aux cotes |
 | `cotes` | calée sur le marché, aucune donnée de forme exploitable |
 | `cotes + forme` | calée sur le marché, légèrement inclinée par la forme récente |
-| `forme seule` | **aucune cote pour caler le modèle** : ordre de grandeur, rien de plus |
+| `forme seule` | `--poisson marche` sans aucune cote : ordre de grandeur, rien de plus |
 
-Pourquoi ce choix : mesuré sur 250 matchs de rapports réels, l'ancien modèle s'écartait
+Ce que vaut chacun : mesuré sur 250 matchs de rapports réels, l'ancien modèle s'écartait
 des probabilités du marché de **11,5 points en moyenne**, avec des dérapages absurdes
 (Coleraine donné gagnant à 70 % contre HJK Helsinki quand le marché le donnait à 24 % ;
 résultat 0-3). Cinq matchs de forme, sans correction du niveau de la ligue ni de
 l'adversaire, ne suffisent pas à estimer une équipe. Le modèle recalé tombe à
 **2,2 points** d'écart moyen.
 
-La conséquence est à comprendre : **un modèle calé sur les cotes ne trouve presque
-jamais de pari à espérance positive**, puisqu'il reproduit le marché diminué de la
-marge. C'est le comportement attendu, pas un défaut. La mise conseillée affichée
-(quart du critère de Kelly) vaut donc « ne pas jouer » la plupart du temps.
+Les deux lectures ont donc leur intérêt : le modèle de forme propose des tickets, le
+modèle de marché dit ce que le bookmaker en pense. **Un modèle calé sur les cotes ne
+trouve presque jamais de pari à espérance positive**, puisqu'il reproduit le marché
+diminué de la marge — c'est le comportement attendu, pas un défaut, et sa mise
+conseillée vaut « ne pas jouer » la plupart du temps.
+
+Les combinés s'adaptent au modèle choisi. Avec `marche`, les sélections sont classées
+par espérance de gain. Avec `forme`, elles le sont par probabilité décroissante : ce
+modèle s'écartant du marché par construction, trier ses sélections par valeur
+reviendrait à choisir celles où il se trompe le plus. Dans les deux cas, une seule
+sélection par match, aucune cote en dessous de 1.20, et la mise conseillée est un quart
+du critère de Kelly plafonné à 5 % du capital.
 
 ### Ce que ça ne prouve pas
 
@@ -294,6 +315,9 @@ le match est analysé sans statistiques et un avertissement le dit.
 # toute la journée, en partant des cotes
 python -m betbot --from-unibet --today --combo 4 --combo-market "Les deux marquent : oui"
 
+# la même journée lue par le modèle calé sur les cotes (lecture prudente)
+python -m betbot --from-unibet --today --combo 4 --poisson marche
+
 # analyser directement les prochaines rencontres cotées chez Unibet
 python -m betbot --from-unibet --matches 10 --combo 4 --combo-market "Les deux marquent : oui"
 
@@ -362,13 +386,19 @@ python -m betbot --matches 20 --only-bettable --odds-csv cotes.csv
 **marchés mélangés** : 6 puis 8 sélections, une seule par match (les issues d'une même
 rencontre ne se combinent pas chez le bookmaker). Chaque sélection est prise parmi les
 marchés **réellement cotés** chez Unibet — double chance, « les deux équipes marquent »
-oui/non, plus/moins de buts, résultat + buts, BTTS 1re mi-temps — et retenue sur la
-meilleure espérance `cote × probabilité`, en écartant :
+oui/non, plus/moins de buts, résultat + buts, BTTS 1re mi-temps.
 
-- les sélections que le modèle juge à moins de 55 % ;
-- celles dont l'écart au marché dépasse +25 %, qui trahissent presque toujours une
-  faiblesse du modèle (équipe mal identifiée, statistiques absentes) plutôt qu'une
-  aubaine.
+Sont toujours écartées les sélections que le modèle juge à moins de 55 %, et les cotes
+inférieures à 1.20 (« plus de 0.5 but » à 1.02 est la sélection la plus probable de
+n'importe quel match, et la moins intéressante à jouer). Le classement dépend ensuite du
+modèle :
+
+- `--poisson marche` : par meilleure espérance `cote × probabilité`, en écartant les
+  écarts au marché supérieurs à +25 %, qui trahissent presque toujours une faiblesse du
+  modèle (équipe mal identifiée, statistiques absentes) plutôt qu'une aubaine ;
+- `--poisson forme` (défaut) : par probabilité décroissante, sans plafond de valeur —
+  ce modèle ignorant les cotes, sa plus grosse valeur affichée est son plus gros écart
+  d'estimation.
 
 Chaque combiné affiche l'heure limite de validation, la probabilité estimée, la cote
 cumulée, la cote équitable, la valeur théorique et le gain pour 10 EUR misés. Ces mêmes

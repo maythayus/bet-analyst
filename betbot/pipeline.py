@@ -167,7 +167,9 @@ def build_bundles(
         )
         # Les cotes servent de reference au modele : elles doivent donc etre attachees
         # a la rencontre avant le calcul.
-        bundle.poisson = poisson.compute(stats, bundle.market_prices())
+        bundle.poisson = poisson.compute(
+            stats, bundle.market_prices(), model=cfg.poisson_model
+        )
         bundles.append(bundle)
     return bundles
 

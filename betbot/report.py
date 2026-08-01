@@ -14,9 +14,10 @@ from betbot.combo import (
     Ticket,
     build_value_ticket,
     kelly_share,
+    market_calibrated,
 )
 from betbot.models import Analysis, MatchBundle, implied_from_odds
-from betbot.poisson import SOURCE_FORM
+from betbot.poisson import SOURCE_FORM, SOURCE_FORM_ONLY
 
 DISCLAIMER = (
     "> Rapport genere automatiquement a partir de Forebet, Flashscore, d'un modele de "
@@ -83,6 +84,16 @@ def _model_note(bundle: MatchBundle) -> str:
             "rencontres. A traiter comme un ordre de grandeur, pas comme une probabilite._"
         )
     gap = poisson.calibration_gap
+    if poisson.source == SOURCE_FORM_ONLY:
+        ecart = (
+            f" Ecart maximal avec le marche : {gap:.1f} pts." if gap is not None else ""
+        )
+        return (
+            f"_{goals} Estimation tiree des cinq derniers matchs de chaque equipe, sans "
+            f"reference aux cotes : elle est plus tranchee que le marche.{ecart} Au-dela "
+            "d'une dizaine de points, l'ecart mesure d'abord l'incertitude du modele, pas "
+            "une occasion (`--poisson marche` pour l'estimation calee sur les cotes)._"
+        )
     calibration = f" Ecart maximal aux marches cotes : {gap:.1f} pts." if gap is not None else ""
     return (
         f"_{goals} Modele cale sur les cotes ({poisson.source}), marge du bookmaker "
@@ -222,19 +233,24 @@ def _selection_block(bundles: list[MatchBundle]) -> str:
         "| --- | --- | --- | --- | --- | --- |",
     ]
     found = positive = False
+    calibrated = market_calibrated(bundles)
     for bundle in bundles:
         opportunities = bundle.opportunities()
         if not opportunities:
             continue
         # Une valeur enorme sur un gros outsider trahit presque toujours une faiblesse du
-        # modele : on privilegie les selections plausibles, jouables telles quelles.
+        # modele : on privilegie les selections plausibles, jouables telles quelles. Le
+        # modele de forme s'ecartant du marche par construction, ses selections sont
+        # classees par probabilite et le plafond de valeur ne s'y applique pas.
         playable = [
             item
             for item in opportunities
             if item[1] >= MIN_LEG_ODDS
             and item[2] >= MIN_LEG_PROBABILITY
-            and item[3] <= MAX_LEG_VALUE
+            and (item[3] <= MAX_LEG_VALUE if calibrated else True)
         ]
+        if not calibrated:
+            playable.sort(key=lambda item: item[2], reverse=True)
         found = True
         market, odds, probability, value = (playable or opportunities)[0]
         share = kelly_share(probability, odds)
@@ -258,6 +274,12 @@ def _selection_block(bundles: list[MatchBundle]) -> str:
             "sur les cotes, il ne trouve d'ecart que la ou la forme recente contredit le "
             "marche ; quand il n'en trouve aucun, s'abstenir est la decision qui rapporte "
             "le plus."
+        )
+    elif not calibrated:
+        rows.append(
+            "\n_Ces esperances sont celles du modele de forme, qui ne connait pas les "
+            "cotes : elles sont larges parce qu'il est tranche, pas parce que le "
+            "bookmaker s'est trompe. `--poisson marche` donne la lecture prudente._"
         )
     return "\n".join(rows)
 

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from math import prod
 
 from betbot.models import MatchBundle
+from betbot.poisson import CALIBRATED_SOURCES
 
 # Chez les bookmakers le nul s'ecrit X, dans le modele il s'ecrit N.
 _SIGN_TO_MARKET = {"X": "N"}
@@ -32,10 +33,14 @@ MIN_LEG_ODDS = 1.20
 # croissance du capital si les probabilites sont exactes ; elles ne le sont jamais, et
 # une surestimation ruine le joueur. Le quart de Kelly est l'usage prudent.
 KELLY_FRACTION = 0.25
+# Plafond de mise, en fraction du capital. Kelly reagit violemment a une probabilite
+# surestimee : sur une cote basse, deux points d'erreur suffisent a conseiller un
+# cinquieme du capital sur un pari perdant.
+KELLY_MAX_SHARE = 0.05
 
 
 def kelly_share(probability: float, odds: float | None) -> float:
-    """Part de capital a miser sur une issue, en fraction de 1, quart de Kelly.
+    """Part de capital a miser sur une issue, en fraction de 1, quart de Kelly plafonne.
 
     Vaut 0 des que le pari n'a pas d'esperance positive selon le modele : dans ce cas
     la mise optimale est de ne pas jouer.
@@ -46,7 +51,7 @@ def kelly_share(probability: float, odds: float | None) -> float:
     edge = chance * odds - 1
     if edge <= 0:
         return 0.0
-    return KELLY_FRACTION * edge / (odds - 1)
+    return min(KELLY_FRACTION * edge / (odds - 1), KELLY_MAX_SHARE)
 
 
 @dataclass
@@ -189,8 +194,25 @@ def _leg_value(leg: Leg) -> float:
     return 100 * ((leg.odds or 0) * leg.probability / 100 - 1)
 
 
+def _leg_probability(leg: Leg) -> float:
+    return leg.probability
+
+
+def market_calibrated(bundles: list[MatchBundle]) -> bool:
+    """Vrai si les probabilites viennent d'un modele cale sur les cotes.
+
+    Le modele de forme est systematiquement plus tranche que le marche : classer ses
+    selections par valeur revient a choisir celles ou il s'ecarte le plus du
+    bookmaker, c'est-a-dire celles ou il a le plus de chances de se tromper. Ses
+    combines sont donc construits par probabilite decroissante, comme dans les
+    premieres versions de Bet.Bot.
+    """
+    sources = [bundle.poisson.source for bundle in bundles if bundle.poisson]
+    return bool(sources) and all(source in CALIBRATED_SOURCES for source in sources)
+
+
 def _priced_selections(
-    bundle: MatchBundle, min_probability: float, max_value: float
+    bundle: MatchBundle, min_probability: float, max_value: float | None
 ) -> list[Leg]:
     """Marches cotes du match dont le modele juge la probabilite suffisante.
 
@@ -209,6 +231,8 @@ def _priced_selections(
         if odds >= MIN_LEG_ODDS
         and (probability := bundle.poisson.markets.get(market, 0.0)) >= min_probability
     ]
+    if max_value is None:
+        return legs
     return [leg for leg in legs if _leg_value(leg) <= max_value]
 
 
@@ -228,14 +252,22 @@ def build_value_ticket(
     retenir les selections dont ce produit est le plus grand, une fois ecartees celles
     dont le modele juge la probabilite trop faible ou dont l'ecart au marche est trop
     beau pour etre vrai.
+
+    Avec le modele de forme, dont l'ecart au marche est la regle et non l'exception, ce
+    tri par esperance selectionnerait les erreurs du modele : les selections sont alors
+    classees par probabilite decroissante, et le plafond de valeur ne s'applique pas.
     """
+    calibrated = market_calibrated(bundles)
+    rank = _leg_value if calibrated else _leg_probability
+    cap = max_leg_value if calibrated else None
+
     best_per_match: list[Leg] = []
     for bundle in bundles:
-        selections = _priced_selections(bundle, min_leg_probability, max_leg_value)
+        selections = _priced_selections(bundle, min_leg_probability, cap)
         if selections:
-            best_per_match.append(max(selections, key=_leg_value))
+            best_per_match.append(max(selections, key=rank))
 
     if len(best_per_match) < legs:
         return None
-    best_per_match.sort(key=_leg_value, reverse=True)
+    best_per_match.sort(key=rank, reverse=True)
     return _chronological(Ticket(best_per_match[:legs]))

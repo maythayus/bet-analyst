@@ -1,4 +1,4 @@
-"""Modele de buts : Dixon-Coles ancre sur les cotes, corrige par la forme recente.
+"""Modele de buts : deux estimations au choix, la forme seule ou l'ancrage sur les cotes.
 
 Deux sources d'information existent pour estimer les buts attendus d'une rencontre :
 les cotes du bookmaker, qui agregent l'information de tout le marche, et la forme
@@ -16,6 +16,19 @@ regularisee, et le resultat est signale comme peu fiable.
 La matrice des scores applique la correction Dixon-Coles : deux lois de Poisson
 independantes sous-estiment les scores nuls et serres, donc la probabilite qu'une
 equipe ne marque pas.
+
+Les deux modeles restent disponibles, `MODEL_FORM` etant celui d'origine :
+
+- `MODEL_FORM` : buts attendus deduits de la seule forme recente, sans correction
+  Dixon-Coles ni reference au marche. Il produit des probabilites nettement plus
+  tranchees que les cotes, donc beaucoup de valeur apparente, dont une partie est de
+  l'erreur d'estimation ;
+- `MODEL_MARKET` : la meme matrice, mais calee sur les cotes dont la marge a ete
+  retiree. Il reproduit le marche a environ deux points pres, et ne trouve donc que
+  rarement un pari a esperance positive.
+
+Dans les deux cas l'ecart aux probabilites du marche est calcule et publie : c'est la
+seule facon de lire un chiffre du premier modele sans se raconter d'histoire.
 """
 
 from __future__ import annotations
@@ -29,6 +42,10 @@ LEAGUE_AVG_GOALS = 1.35  # buts moyens par equipe et par match (championnats eur
 HOME_ADVANTAGE = 1.15
 MAX_GOALS = 8
 SHRINKAGE = 8.0  # pseudo-matchs de regularisation : 5 matchs ne suffisent pas a estimer une force
+# Regularisation et bornes du modele de forme d'origine, plus permissives : elles le
+# laissent atteindre des buts attendus que les cotes ne soutiennent pas.
+FORM_SHRINKAGE = 5.0
+FORM_MIN_LAMBDA, FORM_MAX_LAMBDA = 0.15, 5.0
 # Dependance entre les deux scores : negatif, il ramene du poids sur 0-0 et 1-1, que
 # deux Poisson independantes sous-estiment. Valeur usuelle de la litterature.
 RHO = -0.06
@@ -43,6 +60,17 @@ FIRST_HALF_SHARE = 0.45
 SOURCE_MARKET = "cotes"
 SOURCE_MARKET_FORM = "cotes + forme"
 SOURCE_FORM = "forme seule"
+SOURCE_FORM_ONLY = "forme recente"
+
+# Modeles selectionnables : le premier est celui des premieres versions de Bet.Bot.
+MODEL_FORM = "forme"
+MODEL_MARKET = "marche"
+MODELS = (MODEL_FORM, MODEL_MARKET)
+DEFAULT_MODEL = MODEL_FORM
+
+# Sources issues d'une calibration sur les cotes : leurs valeurs sont comparables au
+# marche, celles du modele de forme ne le sont pas.
+CALIBRATED_SOURCES = (SOURCE_MARKET, SOURCE_MARKET_FORM)
 
 
 # Marches proposes par les bookmakers francais, exprimes comme un predicat sur le
@@ -144,13 +172,15 @@ def _tau(goals_home: int, goals_away: int, lambda_home: float, lambda_away: floa
     return 1.0
 
 
-def score_matrix(lambda_home: float, lambda_away: float) -> list[list[float]]:
-    """Probabilite de chaque score exact, correction Dixon-Coles incluse."""
+def score_matrix(
+    lambda_home: float, lambda_away: float, *, dixon_coles: bool = True
+) -> list[list[float]]:
+    """Probabilite de chaque score exact, correction Dixon-Coles incluse par defaut."""
     rows = [
         [
             _poisson_pmf(home, lambda_home)
             * _poisson_pmf(away, lambda_away)
-            * max(_tau(home, away, lambda_home, lambda_away), 0.0)
+            * (max(_tau(home, away, lambda_home, lambda_away), 0.0) if dixon_coles else 1.0)
             for away in range(MAX_GOALS + 1)
         ]
         for home in range(MAX_GOALS + 1)
@@ -239,12 +269,25 @@ def fit_from_market(odds: dict[str, float]) -> tuple[float, float, float] | None
         if not improved:
             step /= 2
 
-    model = _market_probabilities(score_matrix(*best))
-    gap = max(abs(model[market] - probability) for _weight, market, probability in targets)
-    return best[0], best[1], round(100 * gap, 2)
+    gap = market_gap(_market_probabilities(score_matrix(*best)), odds)
+    return best[0], best[1], gap or 0.0
 
 
-def _shrink(average: float, sample_size: int) -> float:
+def market_gap(markets: dict[str, float], odds: dict[str, float] | None) -> float | None:
+    """Ecart maximal, en points, entre les marches du modele et ceux du bookmaker.
+
+    Calcule quel que soit le modele : un ecart de trente points ne veut pas dire que
+    trente points de valeur sont a prendre, mais que l'une des deux estimations se
+    trompe lourdement, et ce n'est pas toujours celle du bookmaker.
+    """
+    targets = _market_targets(odds) if odds else []
+    if not targets:
+        return None
+    gap = max(abs(markets.get(market, 0.0) - probability) for _w, market, probability in targets)
+    return round(100 * gap, 2)
+
+
+def _shrink(average: float, sample_size: int, shrinkage: float = SHRINKAGE) -> float:
     """Rapproche une moyenne d'echantillon de la moyenne de championnat.
 
     Sur cinq matchs, une moyenne brute est tres bruitee et ignore le niveau des
@@ -253,34 +296,47 @@ def _shrink(average: float, sample_size: int) -> float:
     """
     if sample_size <= 0:
         return LEAGUE_AVG_GOALS
-    weight = sample_size / (sample_size + SHRINKAGE)
+    weight = sample_size / (sample_size + shrinkage)
     return weight * average + (1 - weight) * LEAGUE_AVG_GOALS
 
 
-def _expected_goals(attack: float, opponent_defence: float, *, home: bool) -> float:
+def _expected_goals(
+    attack: float,
+    opponent_defence: float,
+    *,
+    home: bool,
+    bounds: tuple[float, float] = (MIN_LAMBDA, MAX_LAMBDA),
+) -> float:
     attack_strength = (attack or LEAGUE_AVG_GOALS) / LEAGUE_AVG_GOALS
     defence_weakness = (opponent_defence or LEAGUE_AVG_GOALS) / LEAGUE_AVG_GOALS
     expected = attack_strength * defence_weakness * LEAGUE_AVG_GOALS
     if home:
         expected *= HOME_ADVANTAGE
-    return min(max(expected, MIN_LAMBDA), MAX_LAMBDA)
+    return min(max(expected, bounds[0]), bounds[1])
 
 
-def fit_from_form(stats: MatchStats) -> tuple[float, float] | None:
+def fit_from_form(
+    stats: MatchStats,
+    *,
+    shrinkage: float = SHRINKAGE,
+    bounds: tuple[float, float] = (MIN_LAMBDA, MAX_LAMBDA),
+) -> tuple[float, float] | None:
     """Buts attendus deduits de la forme recente, faute de cotes."""
     home, away = stats.home_form, stats.away_form
     if not home or not away or not home.matches_played or not away.matches_played:
         return None
     return (
         _expected_goals(
-            _shrink(home.avg_goals_for, home.matches_played),
-            _shrink(away.avg_goals_against, away.matches_played),
+            _shrink(home.avg_goals_for, home.matches_played, shrinkage),
+            _shrink(away.avg_goals_against, away.matches_played, shrinkage),
             home=True,
+            bounds=bounds,
         ),
         _expected_goals(
-            _shrink(away.avg_goals_for, away.matches_played),
-            _shrink(home.avg_goals_against, home.matches_played),
+            _shrink(away.avg_goals_for, away.matches_played, shrinkage),
+            _shrink(home.avg_goals_against, home.matches_played, shrinkage),
             home=False,
+            bounds=bounds,
         ),
     )
 
@@ -299,9 +355,15 @@ def _tilt(anchor: float, form: float) -> float:
 
 
 def compute(
-    stats: MatchStats, market_odds: dict[str, float] | None = None
+    stats: MatchStats,
+    market_odds: dict[str, float] | None = None,
+    *,
+    model: str = DEFAULT_MODEL,
 ) -> PoissonResult | None:
-    """Probabilites de tous les marches, calees sur les cotes quand elles existent."""
+    """Probabilites de tous les marches, selon le modele demande."""
+    if model == MODEL_FORM:
+        return _compute_from_form(stats, market_odds)
+
     anchor = fit_from_market(market_odds) if market_odds else None
     form = fit_from_form(stats)
 
@@ -319,7 +381,40 @@ def compute(
     else:
         return None
 
-    matrix = score_matrix(lambda_home, lambda_away)
+    return _result(lambda_home, lambda_away, source, calibration_gap, dixon_coles=True)
+
+
+def _compute_from_form(
+    stats: MatchStats, market_odds: dict[str, float] | None
+) -> PoissonResult | None:
+    """Modele d'origine : deux Poisson independantes nourries par la forme recente.
+
+    Les cotes ne servent qu'a mesurer l'ecart obtenu, jamais a corriger l'estimation :
+    c'est le comportement des premieres versions, celui qui produit des probabilites
+    tranchees et donc des combines a forte valeur affichee.
+    """
+    form = fit_from_form(
+        stats, shrinkage=FORM_SHRINKAGE, bounds=(FORM_MIN_LAMBDA, FORM_MAX_LAMBDA)
+    )
+    if not form:
+        return None
+    result = _result(*form, SOURCE_FORM_ONLY, None, dixon_coles=False)
+    result.calibration_gap = market_gap(
+        {market: value / 100 for market, value in result.markets.items()}, market_odds
+    )
+    return result
+
+
+def _result(
+    lambda_home: float,
+    lambda_away: float,
+    source: str,
+    calibration_gap: float | None,
+    *,
+    dixon_coles: bool,
+) -> PoissonResult:
+    """Tous les marches derives d'un couple de buts attendus."""
+    matrix = score_matrix(lambda_home, lambda_away, dixon_coles=dixon_coles)
     combined = _market_probabilities(matrix)
     best_score, best_probability = "0-0", 0.0
     for home, row in enumerate(matrix):

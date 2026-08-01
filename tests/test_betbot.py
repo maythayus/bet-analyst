@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betbot import demo, poisson
 from betbot.cli import discover_market_pages
-from betbot.combo import build_ticket, build_value_ticket, kelly_share
+from betbot.combo import KELLY_MAX_SHARE, build_ticket, build_value_ticket, kelly_share
 from betbot.config import AppConfig, ScrapeConfig
 from betbot.models import (
     BookmakerLine,
@@ -195,7 +195,21 @@ class TestPoisson(unittest.TestCase):
         self.assertIsNone(poisson.compute(stats_without_form))
 
     def test_form_alone_is_flagged_as_such(self) -> None:
-        self.assertEqual(poisson.compute(self.stats).source, poisson.SOURCE_FORM)
+        result = poisson.compute(self.stats, model=poisson.MODEL_MARKET)
+        self.assertEqual(result.source, poisson.SOURCE_FORM)
+
+    def test_the_form_model_is_the_default(self) -> None:
+        """Le modele d'origine reste celui applique sans option : c'est le choix du joueur."""
+        self.assertEqual(poisson.compute(self.stats).source, poisson.SOURCE_FORM_ONLY)
+
+    def test_the_form_model_ignores_the_odds(self) -> None:
+        """Les cotes ne corrigent pas le modele d'origine, elles mesurent son ecart."""
+        odds = {"1": 3.70, "N": 3.80, "2": 1.70}
+        alone = poisson.compute(self.stats)
+        priced = poisson.compute(self.stats, odds)
+        self.assertEqual(alone.markets, priced.markets)
+        self.assertIsNone(alone.calibration_gap)
+        self.assertGreater(priced.calibration_gap, 0)
 
 
 class TestMarketCalibration(unittest.TestCase):
@@ -218,7 +232,9 @@ class TestMarketCalibration(unittest.TestCase):
 
     def test_fitted_model_matches_the_market(self) -> None:
         target = poisson.devig(self.ODDS, ("1", "N", "2"))
-        result = poisson.compute(MatchStats(home_team="A", away_team="B"), self.ODDS)
+        result = poisson.compute(
+            MatchStats(home_team="A", away_team="B"), self.ODDS, model=poisson.MODEL_MARKET
+        )
         self.assertEqual(result.source, poisson.SOURCE_MARKET)
         for outcome, probability in target.items():
             self.assertAlmostEqual(result.markets[outcome], 100 * probability, delta=2.0)
@@ -243,15 +259,25 @@ class TestMarketCalibration(unittest.TestCase):
         stats = MatchStats(
             home_team="Coleraine", away_team="HJK", home_form=prolific, away_form=modest
         )
-        result = poisson.compute(stats, self.ODDS)
+        result = poisson.compute(stats, self.ODDS, model=poisson.MODEL_MARKET)
         self.assertLess(result.markets["1"], 40.0)
         self.assertLess(result.expected_home_goals, 2.0)
+        # Le modele de forme, lui, maintient son favori : c'est sa nature, et le rapport
+        # doit publier l'ecart plutot que le corriger.
+        optimistic = poisson.compute(stats, self.ODDS, model=poisson.MODEL_FORM)
+        self.assertGreater(optimistic.markets["1"], 60.0)
+        self.assertGreater(optimistic.calibration_gap, 30.0)
 
     def test_dixon_coles_adds_weight_to_the_goalless_draw(self) -> None:
         """Deux Poisson independantes sous-estiment le 0-0, donc le « BTTS non »."""
         matrix = poisson.score_matrix(1.3, 1.1)
         self.assertGreater(matrix[0][0], exp(-1.3) * exp(-1.1))
         self.assertAlmostEqual(sum(sum(row) for row in matrix), 1.0, places=6)
+
+    def test_the_form_model_keeps_independent_poisson(self) -> None:
+        """Le modele d'origine n'applique pas Dixon-Coles : il reste reproductible tel quel."""
+        matrix = poisson.score_matrix(1.3, 1.1, dixon_coles=False)
+        self.assertAlmostEqual(matrix[0][0], exp(-1.3) * exp(-1.1), delta=1e-4)
 
 
 class TestCombinedMarkets(unittest.TestCase):
@@ -528,11 +554,15 @@ class TestKelly(unittest.TestCase):
 
     def test_stake_grows_with_the_edge(self) -> None:
         small = kelly_share(55.0, 1.90)
-        large = kelly_share(65.0, 1.90)
+        large = kelly_share(60.0, 1.90)
         self.assertGreater(small, 0)
         self.assertGreater(large, small)
-        # Un quart de Kelly : (p * cote - 1) / (cote - 1) / 4 pour 65 % a 1.90.
-        self.assertAlmostEqual(large, 0.25 * (0.65 * 1.90 - 1) / 0.90, places=6)
+        # Un quart de Kelly : (p * cote - 1) / (cote - 1) / 4 pour 60 % a 1.90.
+        self.assertAlmostEqual(large, 0.25 * (0.60 * 1.90 - 1) / 0.90, places=6)
+
+    def test_stake_is_capped(self) -> None:
+        """Une probabilite surestimee ne doit pas faire conseiller un tiers du capital."""
+        self.assertEqual(kelly_share(95.0, 1.35), KELLY_MAX_SHARE)
 
 
 class TestCombo(unittest.TestCase):
@@ -617,6 +647,17 @@ class TestValueTicket(unittest.TestCase):
 
     def test_returns_nothing_without_enough_priced_matches(self) -> None:
         self.assertIsNone(build_value_ticket(self._bundles(3), legs=8))
+
+    def test_the_form_model_picks_the_likeliest_leg_not_the_widest_gap(self) -> None:
+        """Sans calibration, la plus grosse valeur affichee est la plus grosse erreur.
+
+        Le modele de forme est plus tranche que le marche : la cote 4.20 sur l'exterieur
+        y semble une aubaine alors qu'elle reste le resultat le moins probable.
+        """
+        ticket = build_value_ticket(self._bundles(6), legs=6)
+        assert ticket is not None
+        self.assertTrue(all(leg.market != "2" for leg in ticket.legs))
+        self.assertTrue(all(leg.probability >= 55.0 for leg in ticket.legs))
 
 
 class TestFlashscoreSearch(unittest.TestCase):

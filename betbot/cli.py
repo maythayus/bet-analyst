@@ -7,6 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
+from betbot import poisson
 from betbot.combo import build_ticket
 from betbot.config import AppConfig
 from betbot.pipeline import run
@@ -119,6 +120,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(plus rapide, mais pas de cote pour les marches combines)",
     )
     parser.add_argument(
+        "--poisson",
+        choices=poisson.MODELS,
+        default=None,
+        help="modele de buts : 'forme' (defaut, celui d'origine : probabilites tranchees "
+        "deduites des cinq derniers matchs) ou 'marche' (cale sur les cotes, marge "
+        "retiree : proche du marche, donc peu de valeur trouvee)",
+    )
+    parser.add_argument(
         "--combo",
         type=int,
         default=None,
@@ -212,6 +221,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg.scrape.max_matches = args.matches
     elif args.today:
         cfg.scrape.max_matches = ALL_MATCHES
+    if args.poisson:
+        cfg.poisson_model = args.poisson
     if args.model:
         cfg.lmstudio.model = args.model
     if args.api_key:

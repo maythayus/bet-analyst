@@ -61,3 +61,5 @@ class AppConfig:
     lmstudio: LMStudioConfig = field(default_factory=LMStudioConfig)
     scrape: ScrapeConfig = field(default_factory=ScrapeConfig)
     output_dir: Path = DEFAULT_OUTPUT_DIR
+    # Modele de buts : "forme" (celui d'origine) ou "marche" (cale sur les cotes).
+    poisson_model: str = os.getenv("BETBOT_POISSON", "forme")
