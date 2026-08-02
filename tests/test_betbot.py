@@ -76,6 +76,8 @@ def _market_page(title: str, pick: str, probability: str, columns: str = "") -> 
   <div class="fprc">{columns}</div>
   <div class="predict"><span class="forepr">{pick}</span></div>
   <span class="fpr">{probability}</span>
+  <div class="ex_sc">2-1</div>
+  <div class="avg_sc">2.8</div>
 </div>
 </body></html>
 """
@@ -117,6 +119,22 @@ class TestForebetMarketPages(unittest.TestCase):
         self.assertEqual(prediction.markets["1 (1re mi-temps)"], 10.0)
         self.assertEqual(prediction.markets["N (1re mi-temps)"], 39.0)
         self.assertEqual(prediction.markets["2 (1re mi-temps)"], 51.0)
+
+    def test_the_1x2_page_carries_the_forebet_forecast(self) -> None:
+        """Partant du listing du bookmaker, c'est la seule source du pronostic Forebet."""
+        _, (prediction,) = parse_market_page(
+            _market_page(
+                "Predictions 1X2 | Today Forebet Football",
+                "1",
+                "48",
+                columns="<span>48</span><span>31</span><span>22</span>",
+            )
+        )
+        self.assertEqual(prediction.markets, {"1": 48.0, "N": 31.0, "2": 22.0})
+        self.assertEqual(
+            (prediction.prob_home, prediction.prob_draw, prediction.prob_away), (48.0, 31.0, 22.0)
+        )
+        self.assertEqual(prediction.predicted_score, "2-1")
 
     def test_rejects_an_unrelated_page(self) -> None:
         with self.assertRaises(FetchError):
@@ -185,6 +203,28 @@ class TestMergeForebetMarkets(unittest.TestCase):
         )
         merge_forebet_markets([prediction], [extra])
         self.assertEqual(prediction.markets, {"Plus de 2.5 buts": 61.0})
+
+    def test_the_1x2_page_fills_the_forebet_forecast(self) -> None:
+        """Sans elle, une rencontre venue d'Unibet n'a aucun pronostic Forebet a comparer."""
+        prediction = ForebetPrediction(home_team="Olympique Lyonnais", away_team="Stade Rennais")
+        extra = ForebetPrediction(
+            home_team="Lyon",
+            away_team="Rennes",
+            markets={"1": 48.0, "N": 31.0, "2": 22.0},
+            prob_home=48.0,
+            prob_draw=31.0,
+            prob_away=22.0,
+            predicted_score="2-1",
+        )
+        merge_forebet_markets([prediction], [extra])
+        self.assertEqual(prediction.prob_home, 48.0)
+        self.assertEqual(prediction.predicted_score, "2-1")
+
+    def test_a_known_forecast_is_not_overwritten(self) -> None:
+        prediction = ForebetPrediction(home_team="Lyon", away_team="Rennes", prob_home=55.0)
+        extra = ForebetPrediction(home_team="Lyon", away_team="Rennes", prob_home=48.0)
+        merge_forebet_markets([prediction], [extra])
+        self.assertEqual(prediction.prob_home, 55.0)
 
     def test_leaves_unknown_fixtures_untouched(self) -> None:
         prediction = ForebetPrediction(home_team="Lyon", away_team="Rennes")

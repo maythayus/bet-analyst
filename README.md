@@ -451,7 +451,7 @@ contient des espaces) :
 python -m betbot --forebet-html "C:\Users\<toi>\Desktop\Football Predictions for Today _ Forebet.htm" --today --only-bettable
 ```
 
-### Pages Forebet par marché (les deux marquent, +/-2.5, double chance, mi-temps)
+### Pages Forebet par marché (1X2, les deux marquent, +/-2.5, double chance, mi-temps)
 
 Forebet publie une page par marché. Enregistre-les de la même façon (Ctrl+S) **dans le
 dossier du projet, sans les renommer** : Bet.Bot ramasse tout seul les fichiers
@@ -464,6 +464,7 @@ répétable :
 
 ```powershell
 python -m betbot --from-unibet --today `
+  --forebet-market-html "Predictions 1X2 _ Today Forebet Football.htm" `
   --forebet-market-html "Predictions Both to score _ Today Forebet Football.htm" `
   --forebet-market-html "Predictions Under_Over 2.5 goals _ Today Forebet Football.htm" `
   --forebet-market-html "Predictions Double chance _ Today Forebet Football.htm" `
@@ -474,10 +475,16 @@ Pages reconnues (le type est déduit du titre de la page, l'ordre des fichiers e
 
 | Page Forebet | Marchés ajoutés au rapport |
 | --- | --- |
+| `predictions-1x2` | 1, N, 2 du temps réglementaire, score exact et moyenne de buts |
 | `both-to-score` | Les deux marquent : oui / non |
 | `under-over-25-goals` | Plus de 2.5 buts / Moins de 2.5 buts |
 | `double-chance-predictions` | 1N, 12, N2 |
 | `predictions-ht` | 1, N, 2 de la 1re mi-temps |
+
+La page <https://www.forebet.com/en/football-tips-and-predictions-for-today/predictions-1x2>
+est la plus utile des cinq avec `--from-unibet` : en partant du listing du bookmaker,
+c'est la seule source du pronostic Forebet lui-même. Sans elle, la ligne « Forebet » du
+tableau de comparaison reste vide et il ne reste que le modèle face au marché.
 
 Ces probabilités apparaissent dans une section **Marchés (pages Forebet)** de chaque
 match, à côté de celles du modèle et de la cote Unibet, et dans le JSON sous

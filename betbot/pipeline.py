@@ -118,6 +118,9 @@ def merge_forebet_markets(
 
     Les noms d'equipes de ces pages sont ceux de Forebet, pas ceux du bookmaker :
     l'appariement passe par la comparaison tolerante deja utilisee pour les cotes.
+
+    La page 1X2 apporte en plus le pronostic Forebet lui-meme : en partant du listing
+    du bookmaker, c'est la seule source de ses probabilites 1 N 2 et de son score exact.
     """
     for prediction in predictions:
         for candidate in extra:
@@ -125,6 +128,7 @@ def merge_forebet_markets(
                 candidate.home_team, prediction.home_team
             ) and bookmakers.teams_match(candidate.away_team, prediction.away_team):
                 prediction.markets.update(candidate.markets)
+                forebet.copy_forecast(candidate, prediction)
                 break
         else:
             log.info(

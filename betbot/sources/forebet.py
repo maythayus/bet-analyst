@@ -114,6 +114,13 @@ _DOUBLE_CHANCE = {"1x": "1N", "x1": "1N", "x2": "N2", "2x": "N2", "12": "12", "2
 
 def _market_probabilities(row: Tag, page: str) -> dict[str, float]:
     """Probabilites du marche traite par la page, pour une ligne de rencontre."""
+    if page == "1x2":
+        # La page 1X2 donne les trois issues du temps reglementaire, comme le listing.
+        home, draw, away = _parse_probabilities(row)
+        if None in (home, draw, away):
+            return {}
+        return dict(zip(("1", "N", "2"), (home, draw, away), strict=True))
+
     pick = _first_text(row, [".forepr"])
     probability = _to_float(_first_text(row, [".fpr"]))
     if not pick or probability is None:
@@ -145,7 +152,7 @@ def market_page_kind(html: str | bytes) -> str | None:
     """Marche traite par une page Forebet specialisee, d'apres son titre."""
     soup = BeautifulSoup(html, "html.parser")
     title = soup.title.get_text(" ", strip=True).lower() if soup.title else ""
-    for key in (*_TWO_WAY_PAGES, "double chance", "half time"):
+    for key in (*_TWO_WAY_PAGES, "double chance", "half time", "1x2"):
         if key in title:
             return key
     return None
@@ -161,7 +168,7 @@ def parse_market_page(html: str | bytes) -> tuple[str, list[ForebetPrediction]]:
     page = market_page_kind(html)
     if page is None:
         raise FetchError(
-            "Page Forebet non reconnue : attendu une page « Both to score », "
+            "Page Forebet non reconnue : attendu une page « 1X2 », « Both to score », "
             "« Under/Over 2.5 goals », « Double chance » ou « Half Time (HT) »."
         )
 
@@ -173,15 +180,22 @@ def parse_market_page(html: str | bytes) -> tuple[str, list[ForebetPrediction]]:
         markets = _market_probabilities(row, page) if home and away else {}
         if not markets:
             continue
-        predictions.append(
-            ForebetPrediction(
-                home_team=home,
-                away_team=away,
-                kickoff=_first_text(row, [".date_bah", ".date", ".stime"]),
-                competition=_first_text(row, [".shortTag", ".tnmscn a", ".leag"]),
-                markets=markets,
-            )
+        prediction = ForebetPrediction(
+            home_team=home,
+            away_team=away,
+            kickoff=_first_text(row, [".date_bah", ".date", ".stime"]),
+            competition=_first_text(row, [".shortTag", ".tnmscn a", ".leag"]),
+            markets=markets,
         )
+        if page == "1x2":
+            # Cette page est le listing complet de la journee : elle porte aussi le
+            # pronostic Forebet lui-meme, score exact et moyenne de buts compris.
+            prediction.prob_home = markets["1"]
+            prediction.prob_draw = markets["N"]
+            prediction.prob_away = markets["2"]
+            prediction.predicted_score = _first_text(row, [".ex_sc", ".predict_y", ".ex"])
+            prediction.avg_goals = _to_float(_first_text(row, [".avg_sc", ".avgsc"]))
+        predictions.append(prediction)
 
     log.info("Forebet (%s) : %d rencontres lues", page, len(predictions))
     return page, predictions
@@ -206,7 +220,20 @@ def read_market_pages(paths: list[Path]) -> list[ForebetPrediction]:
                 merged[key] = prediction
             else:
                 existing.markets.update(prediction.markets)
+                copy_forecast(prediction, existing)
     return list(merged.values())
+
+
+def copy_forecast(source: ForebetPrediction, target: ForebetPrediction) -> None:
+    """Reporte le pronostic 1 X 2 de Forebet, sans ecraser une valeur deja connue.
+
+    Seule la page 1X2 porte ces champs ; les autres pages n'ont que leur marche.
+    """
+    target.prob_home = target.prob_home if target.prob_home is not None else source.prob_home
+    target.prob_draw = target.prob_draw if target.prob_draw is not None else source.prob_draw
+    target.prob_away = target.prob_away if target.prob_away is not None else source.prob_away
+    target.predicted_score = target.predicted_score or source.predicted_score
+    target.avg_goals = target.avg_goals if target.avg_goals is not None else source.avg_goals
 
 
 def fetch_predictions(
