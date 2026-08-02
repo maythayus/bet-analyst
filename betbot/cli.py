@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -17,6 +19,8 @@ from betbot.sources.http import FetchError
 # Avec --today, la journee entiere est analysee : ce plafond n'existe que pour eviter
 # une boucle sans fin si Unibet renvoyait un listing aberrant.
 ALL_MATCHES = 500
+
+log = logging.getLogger(__name__)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -150,6 +154,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "probables sont retirees jusqu'a atteindre ce seuil, ex. 25",
     )
     parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="ne pas ouvrir le rapport dans l'editeur de texte par defaut a la fin",
+    )
+    parser.add_argument(
         "--print",
         dest="print_report",
         action="store_true",
@@ -163,6 +172,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--demo", action="store_true", help="donnees fictives, aucun acces reseau")
     parser.add_argument("--verbose", "-v", action="store_true", help="logs detailles")
     return parser.parse_args(argv)
+
+
+def open_report(path: Path) -> None:
+    """Ouvre le rapport dans l'application associee aux fichiers .md.
+
+    Sous Windows, une machine sans association pour le Markdown est frequente : le
+    Bloc-notes prend alors le relais. L'echec reste sans consequence, le chemin du
+    rapport vient d'etre affiche.
+    """
+    try:
+        if sys.platform == "win32":
+            try:
+                os.startfile(path)
+            except OSError:
+                subprocess.run(["notepad.exe", str(path)], check=False)
+        else:
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.run([opener, str(path)], check=False)
+    except OSError as exc:
+        log.debug("Ouverture du rapport impossible : %s", exc)
 
 
 def install_chromium() -> int:
@@ -296,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
         print(build_markdown(pairs, ticket))
     print(f"\nRapport  : {markdown_path}")
     print(f"Donnees  : {json_path}")
+    if not args.no_open:
+        open_report(markdown_path)
     return 0
 
 

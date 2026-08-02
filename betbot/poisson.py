@@ -175,7 +175,12 @@ def _tau(goals_home: int, goals_away: int, lambda_home: float, lambda_away: floa
 def score_matrix(
     lambda_home: float, lambda_away: float, *, dixon_coles: bool = True
 ) -> list[list[float]]:
-    """Probabilite de chaque score exact, correction Dixon-Coles incluse par defaut."""
+    """Probabilite de chaque score exact, correction Dixon-Coles incluse par defaut.
+
+    Sans Dixon-Coles, la matrice reste celle de deux lois de Poisson independantes,
+    tronquee a `MAX_GOALS` et non renormalisee : c'est le calcul du modele de forme
+    d'origine, et les probabilites publiees doivent lui rester identiques.
+    """
     rows = [
         [
             _poisson_pmf(home, lambda_home)
@@ -185,6 +190,8 @@ def score_matrix(
         ]
         for home in range(MAX_GOALS + 1)
     ]
+    if not dixon_coles:
+        return rows
     total = sum(sum(row) for row in rows)
     return [[value / total for value in row] for row in rows]
 

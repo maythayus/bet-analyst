@@ -282,6 +282,10 @@ analyse.cmd --matches 20 --odds-range 1.65 1.95 --print    tes propres options
 
 En ligne de commande, `--print` affiche le rapport en plus de l'écrire dans `out/`.
 
+À la fin de chaque analyse, le rapport Markdown s'ouvre tout seul dans l'application
+associée aux fichiers `.md` sous Windows (Bloc-notes par défaut). `--no-open` supprime
+cette ouverture, par exemple dans une tâche planifiée.
+
 ### Version exécutable (`Bet.Bot.exe`)
 
 `build-exe.cmd` fabrique un `dist\Bet.Bot.exe` autonome (~47 Mo), qui tourne sans Python

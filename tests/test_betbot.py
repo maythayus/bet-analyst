@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from dataclasses import replace
-from math import exp
+from math import exp, factorial
 from pathlib import Path
 from typing import ClassVar
 from unittest import mock
@@ -14,7 +14,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betbot import demo, poisson
-from betbot.cli import discover_market_pages
+from betbot.cli import discover_market_pages, open_report
 from betbot.combo import KELLY_MAX_SHARE, build_ticket, build_value_ticket, kelly_share
 from betbot.config import AppConfig, ScrapeConfig
 from betbot.models import (
@@ -142,6 +142,39 @@ class TestDiscoverMarketPages(unittest.TestCase):
                 "Predictions Double chance _ Today Forebet Football.html",
             },
         )
+
+
+class TestOpenReport(unittest.TestCase):
+    """Le rapport s'ouvre tout seul dans l'application associee aux fichiers Markdown."""
+
+    def test_windows_uses_the_default_application(self) -> None:
+        report = Path("out") / "rapport.md"
+        with (
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch("betbot.cli.os.startfile", create=True) as startfile,
+        ):
+            open_report(report)
+        startfile.assert_called_once_with(report)
+
+    def test_notepad_takes_over_without_a_markdown_association(self) -> None:
+        """Beaucoup de machines n'associent aucune application aux fichiers .md."""
+        report = Path("out") / "rapport.md"
+        with (
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch("betbot.cli.os.startfile", create=True, side_effect=OSError("pas d'appli")),
+            mock.patch("betbot.cli.subprocess.run") as run,
+        ):
+            open_report(report)
+        run.assert_called_once_with(["notepad.exe", str(report)], check=False)
+
+    def test_a_missing_viewer_does_not_fail_the_run(self) -> None:
+        """Le chemin vient d'etre affiche : ne pas pouvoir l'ouvrir n'est pas une erreur."""
+        with (
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch("betbot.cli.os.startfile", create=True, side_effect=OSError("pas d'appli")),
+            mock.patch("betbot.cli.subprocess.run", side_effect=OSError("pas de bloc-notes")),
+        ):
+            open_report(Path("out") / "rapport.md")
 
 
 class TestMergeForebetMarkets(unittest.TestCase):
@@ -277,7 +310,40 @@ class TestMarketCalibration(unittest.TestCase):
     def test_the_form_model_keeps_independent_poisson(self) -> None:
         """Le modele d'origine n'applique pas Dixon-Coles : il reste reproductible tel quel."""
         matrix = poisson.score_matrix(1.3, 1.1, dixon_coles=False)
-        self.assertAlmostEqual(matrix[0][0], exp(-1.3) * exp(-1.1), delta=1e-4)
+        self.assertAlmostEqual(matrix[0][0], exp(-1.3) * exp(-1.1), delta=1e-15)
+
+    def test_the_form_model_matrix_is_not_renormalised(self) -> None:
+        """La renormalisation deplacerait les probabilites publiees par la V1.
+
+        Le modele d'origine tronque les scores a huit buts sans redistribuer la masse
+        perdue : sur une equipe tres prolifique, renormaliser suffirait a changer le
+        « les deux marquent » de plusieurs dixiemes de point.
+        """
+        matrix = poisson.score_matrix(3.5, 2.8, dixon_coles=False)
+        self.assertLess(sum(sum(row) for row in matrix), 1.0)
+        self.assertAlmostEqual(matrix[2][1], exp(-3.5) * 3.5**2 / 2 * exp(-2.8) * 2.8, places=12)
+
+    def test_the_form_model_btts_matches_the_v1_formula(self) -> None:
+        """« Les deux marquent : oui » doit rester le produit de deux Poisson tronquees."""
+        prolific = TeamForm(
+            name="A", last_results=["W"] * 5, goals_for=12, goals_against=9, matches_played=5
+        )
+        opponent = TeamForm(
+            name="B", last_results=["D"] * 5, goals_for=10, goals_against=11, matches_played=5
+        )
+        stats = MatchStats(home_team="A", away_team="B", home_form=prolific, away_form=opponent)
+        result = poisson.compute(stats)
+
+        def scores_at_least_once(lam: float) -> float:
+            return sum(exp(-lam) * lam**goals / factorial(goals) for goals in range(1, 9))
+
+        expected = 100 * (
+            scores_at_least_once(result.expected_home_goals)
+            * scores_at_least_once(result.expected_away_goals)
+        )
+        # Les buts attendus sont publies arrondis au centieme : la comparaison ne peut
+        # pas etre plus fine que l'arrondi lui-meme.
+        self.assertAlmostEqual(result.markets["Les deux marquent : oui"], expected, delta=0.1)
 
 
 class TestCombinedMarkets(unittest.TestCase):
