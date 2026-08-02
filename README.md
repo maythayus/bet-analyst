@@ -1,3 +1,5 @@
+<img width="248" height="674" alt="Capture d’écran 2026-08-02 155300" src="https://github.com/user-attachments/assets/e54aac81-aa42-4a25-ad9e-a507f2095b73" />
+<img width="263" height="314" alt="Capture d’écran 2026-08-02 155320" src="https://github.com/user-attachments/assets/f261dcf5-303a-413e-ac19-95f37dba66a6" />
 ﻿# Bet.Bot
 
 Pipeline local d'aide à l'analyse de paris sportifs :
