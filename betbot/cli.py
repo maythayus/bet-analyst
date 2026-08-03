@@ -14,6 +14,7 @@ from betbot.combo import build_ticket
 from betbot.config import AppConfig
 from betbot.pipeline import run
 from betbot.report import build_markdown, write_report
+from betbot.share import ShareError, publish_report, send_report
 from betbot.sources.http import FetchError
 
 # Avec --today, la journee entiere est analysee : ce plafond n'existe que pour eviter
@@ -154,6 +155,32 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "probables sont retirees jusqu'a atteindre ce seuil, ex. 25",
     )
     parser.add_argument(
+        "--mail-to",
+        default=None,
+        metavar="ADRESSE",
+        help="envoyer le rapport par courriel (adresses separees par des virgules) ; "
+        "identifiants SMTP dans le fichier .env. Sans cette option, l'adresse "
+        "BETBOT_MAIL_TO du .env est utilisee",
+    )
+    parser.add_argument(
+        "--no-mail",
+        action="store_true",
+        help="ne pas envoyer le rapport par courriel, meme si BETBOT_MAIL_TO est defini",
+    )
+    parser.add_argument(
+        "--wordpress",
+        action="store_true",
+        help="publier le rapport en article WordPress (brouillon par defaut) ; "
+        "identifiants dans le fichier .env",
+    )
+    parser.add_argument(
+        "--wordpress-status",
+        default=None,
+        choices=("draft", "publish", "private"),
+        help="statut de l'article WordPress (defaut : draft, un pronostic se relit "
+        "avant publication)",
+    )
+    parser.add_argument(
         "--no-open",
         action="store_true",
         help="ne pas ouvrir le rapport dans l'editeur de texte par defaut a la fin",
@@ -192,6 +219,31 @@ def open_report(path: Path) -> None:
             subprocess.run([opener, str(path)], check=False)
     except OSError as exc:
         log.debug("Ouverture du rapport impossible : %s", exc)
+
+
+def share_report(
+    args: argparse.Namespace, cfg: AppConfig, markdown_path: Path, json_path: Path
+) -> None:
+    """Diffuse le rapport par courriel et sur WordPress, si demande.
+
+    Le rapport est deja ecrit sur le disque : un echec de diffusion est signale mais ne
+    fait pas echouer l'analyse.
+    """
+    destinations = "" if args.no_mail else (args.mail_to or cfg.mail.recipients)
+    if destinations:
+        try:
+            send_report(cfg.mail, markdown_path, [markdown_path, json_path], destinations)
+            print(f"Courriel : envoye a {destinations}")
+        except ShareError as exc:
+            print(f"Courriel non envoye : {exc}", file=sys.stderr)
+
+    if args.wordpress:
+        if args.wordpress_status:
+            cfg.wordpress.status = args.wordpress_status
+        try:
+            print(f"WordPress : {publish_report(cfg.wordpress, markdown_path)}")
+        except ShareError as exc:
+            print(f"WordPress : publication impossible : {exc}", file=sys.stderr)
 
 
 def install_chromium() -> int:
@@ -325,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
         print(build_markdown(pairs, ticket))
     print(f"\nRapport  : {markdown_path}")
     print(f"Donnees  : {json_path}")
+    share_report(args, cfg, markdown_path, json_path)
     if not args.no_open:
         open_report(markdown_path)
     return 0

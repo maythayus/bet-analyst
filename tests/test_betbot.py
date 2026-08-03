@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from betbot import demo, poisson
 from betbot.cli import discover_market_pages, open_report
 from betbot.combo import KELLY_MAX_SHARE, build_ticket, build_value_ticket, kelly_share
-from betbot.config import AppConfig, ScrapeConfig
+from betbot.config import AppConfig, MailConfig, ScrapeConfig, WordPressConfig
 from betbot.models import (
     BookmakerLine,
     ForebetPrediction,
@@ -31,6 +31,7 @@ from betbot.pipeline import (
     predictions_from_odds,
 )
 from betbot.report import build_markdown
+from betbot.share import ShareError, markdown_to_html, publish_report, send_report
 from betbot.sources import bookmakers, flashscore
 from betbot.sources.forebet import parse_market_page, parse_predictions
 from betbot.sources.http import FetchError
@@ -193,6 +194,83 @@ class TestOpenReport(unittest.TestCase):
             mock.patch("betbot.cli.subprocess.run", side_effect=OSError("pas de bloc-notes")),
         ):
             open_report(Path("out") / "rapport.md")
+
+
+class TestShare(unittest.TestCase):
+    """Diffusion du rapport : conversion HTML, courriel, WordPress."""
+
+    MARKDOWN = (
+        "# Bet.Bot - rapport\n\n> Avertissement\n\n## Ticket\n"
+        "| Match | Cote |\n| --- | --- |\n| Lyon vs Rennes | 1.55 |\n\n"
+        "Valeur : **+12 %**\n"
+    )
+
+    def test_markdown_becomes_html(self) -> None:
+        html = markdown_to_html(self.MARKDOWN)
+        self.assertIn("<h1>Bet.Bot - rapport</h1>", html)
+        self.assertIn("<blockquote><p>Avertissement</p></blockquote>", html)
+        self.assertIn("<th>Match</th>", html)
+        self.assertIn("<td>Lyon vs Rennes</td>", html)
+        self.assertIn("<strong>+12 %</strong>", html)
+        self.assertNotIn("| --- |", html)
+
+    def test_html_is_escaped(self) -> None:
+        self.assertIn("&lt;script&gt;", markdown_to_html("<script>alert(1)</script>"))
+
+    def test_mail_needs_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            report = Path(folder) / "rapport.md"
+            report.write_text(self.MARKDOWN, encoding="utf-8")
+            config = MailConfig(user="", password="")
+            with self.assertRaises(ShareError):
+                send_report(config, report, [report], "kaelmi@example.com")
+
+    def test_mail_carries_the_report_and_its_files(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            report = Path(folder) / "rapport.md"
+            report.write_text(self.MARKDOWN, encoding="utf-8")
+            data = Path(folder) / "donnees.json"
+            data.write_text("{}", encoding="utf-8")
+            config = MailConfig(host="smtp.test", port=587, user="a@b.c", password="secret")
+            with mock.patch("betbot.share.smtplib.SMTP") as smtp:
+                send_report(config, report, [report, data], "kaelmi@example.com")
+            message = smtp.return_value.__enter__.return_value.send_message.call_args[0][0]
+        self.assertEqual(message["To"], "kaelmi@example.com")
+        self.assertEqual(message["Subject"], "Bet.Bot - rapport")
+        self.assertEqual(
+            [part.get_filename() for part in message.iter_attachments()],
+            ["rapport.md", "donnees.json"],
+        )
+
+    def test_wordpress_posts_a_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            report = Path(folder) / "rapport.md"
+            report.write_text(self.MARKDOWN, encoding="utf-8")
+            config = WordPressConfig(
+                site="https://exemple.fr/", user="mikael", password="mot de passe"
+            )
+            response = mock.Mock(status_code=201)
+            response.json.return_value = {"link": "https://exemple.fr/?p=12"}
+            with mock.patch("betbot.share.requests.post", return_value=response) as post:
+                link = publish_report(config, report)
+        self.assertEqual(link, "https://exemple.fr/?p=12")
+        self.assertEqual(post.call_args.args[0], "https://exemple.fr/wp-json/wp/v2/posts")
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["status"], "draft")
+        self.assertEqual(payload["title"], "Bet.Bot - rapport")
+        self.assertIn("<h1>", payload["content"])
+
+    def test_wordpress_refusal_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            report = Path(folder) / "rapport.md"
+            report.write_text(self.MARKDOWN, encoding="utf-8")
+            config = WordPressConfig(site="https://exemple.fr", user="a", password="b")
+            response = mock.Mock(status_code=401, text="Unauthorized")
+            with (
+                mock.patch("betbot.share.requests.post", return_value=response),
+                self.assertRaises(ShareError),
+            ):
+                publish_report(config, report)
 
 
 class TestMergeForebetMarkets(unittest.TestCase):
