@@ -148,6 +148,12 @@ def send_report(cfg: MailConfig, markdown_path: Path, attachments: list[Path], t
                 server.starttls()
                 server.login(cfg.user, cfg.password)
                 server.send_message(message)
+    except smtplib.SMTPAuthenticationError as exc:
+        raise ShareError(
+            f"{cfg.host} a refuse les identifiants : {exc}. Un mot de passe d'application "
+            "(16 lettres minuscules, jamais celui du compte) se cree sur "
+            "https://myaccount.google.com/apppasswords"
+        ) from exc
     except (smtplib.SMTPException, OSError) as exc:
         raise ShareError(f"Envoi impossible via {cfg.host}:{cfg.port} : {exc}") from exc
 
@@ -174,13 +180,21 @@ def publish_report(cfg: WordPressConfig, markdown_path: Path, *, timeout: float 
     if categories:
         payload["categories"] = categories
 
-    endpoint = f"{cfg.site.rstrip('/')}/wp-json/wp/v2/posts"
+    site = cfg.site.rstrip("/")
+    endpoint = f"{site}/wp-json/wp/v2/posts"
     try:
         response = requests.post(
             endpoint, json=payload, auth=(cfg.user, cfg.password), timeout=timeout
         )
     except requests.RequestException as exc:
         raise ShareError(f"WordPress injoignable ({endpoint}) : {exc}") from exc
+    if response.status_code in (401, 403):
+        raise ShareError(
+            f"WordPress a refuse les identifiants ({response.status_code}) : "
+            f"{response.text[:200]}. BETBOT_WP_USER est l'identifiant de connexion, et "
+            "BETBOT_WP_PASSWORD un mot de passe d'application (24 caracteres en six "
+            f"groupes), tous deux lisibles sur {site}/wp-admin/profile.php"
+        )
     if response.status_code >= 400:
         raise ShareError(
             f"WordPress a refuse l'article ({response.status_code}) : {response.text[:200]}"
