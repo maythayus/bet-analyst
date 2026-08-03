@@ -288,6 +288,57 @@ En ligne de commande, `--print` affiche le rapport en plus de l'écrire dans `ou
 associée aux fichiers `.md` sous Windows (Bloc-notes par défaut). `--no-open` supprime
 cette ouverture, par exemple dans une tâche planifiée.
 
+### Partager le rapport : courriel et WordPress
+
+Les identifiants ne se tapent pas en ligne de commande : copie `.env.exemple` en `.env`
+à la racine du projet et remplis-le. Ce fichier est ignoré par Git.
+
+```powershell
+copy .env.exemple .env
+notepad .env
+```
+
+**Courriel.** Le rapport part en HTML dans le corps du message, avec le `.md` et le
+`.json` en pièces jointes.
+
+```powershell
+python -m betbot --from-unibet --today --mail-to kaelmi@gmail.com
+python -m betbot --from-unibet --today          # BETBOT_MAIL_TO du .env suffit
+python -m betbot --from-unibet --today --no-mail # ne rien envoyer ce coup-ci
+```
+
+Gmail refuse le mot de passe du compte : il faut un **mot de passe d'application**
+(https://myaccount.google.com/apppasswords), à mettre dans `BETBOT_MAIL_PASSWORD`. Un
+autre fournisseur se configure avec `BETBOT_MAIL_HOST` / `BETBOT_MAIL_PORT` (587 pour
+STARTTLS, 465 pour SSL).
+
+**WordPress.** Le Markdown est converti en HTML et publié en article via l'API REST.
+
+```powershell
+python -m betbot --from-unibet --today --wordpress
+python -m betbot --from-unibet --today --wordpress --wordpress-status publish
+```
+
+L'article part en **brouillon** par défaut : un pronostic se relit avant d'être publié.
+`BETBOT_WP_PASSWORD` attend un **mot de passe d'application** WordPress (Utilisateurs →
+Profil → Mots de passe d'application), pas le mot de passe du compte, et le site doit
+être en HTTPS. `BETBOT_WP_CATEGORIES` accepte des identifiants de catégories séparés par
+des virgules.
+
+Une diffusion qui échoue n'interrompt pas l'analyse : le rapport reste écrit dans `out/`
+et l'erreur est affichée.
+
+**Publier sur un site public** implique des obligations légales en France (mention ANJ,
+interdiction aux mineurs) : garde l'avertissement du rapport en tête d'article.
+
+### Dossier réseau
+
+`--output` accepte un partage Windows, sans autre réglage :
+
+```powershell
+python -m betbot --from-unibet --today --output \\NARCISSOT-M\out
+```
+
 ### Version exécutable (`Bet.Bot.exe`)
 
 `build-exe.cmd` fabrique un `dist\Bet.Bot.exe` autonome (~47 Mo), qui tourne sans Python
@@ -518,6 +569,15 @@ Les rapports sont écrits dans `out/` : `rapport-<date>.md` (lisible) et
 | `MAX_MATCHES` | `10` | nombre de matchs |
 | `FLASHSCORE_HEADLESS` | `1` | `0` pour voir le navigateur |
 | `FOREBET_URL` | page « predictions for today » | listing à scraper |
+| `BETBOT_MAIL_HOST` / `BETBOT_MAIL_PORT` | `smtp.gmail.com` / `587` | serveur SMTP |
+| `BETBOT_MAIL_USER` / `BETBOT_MAIL_PASSWORD` | — | compte d'envoi et mot de passe d'application |
+| `BETBOT_MAIL_TO` | — | destinataires, séparés par des virgules |
+| `BETBOT_WP_SITE` | — | racine du site WordPress (HTTPS) |
+| `BETBOT_WP_USER` / `BETBOT_WP_PASSWORD` | — | identifiant et mot de passe d'application WordPress |
+| `BETBOT_WP_STATUS` | `draft` | `draft`, `publish` ou `private` |
+
+Ces variables se posent une fois pour toutes dans un fichier `.env` à la racine du
+projet (voir `.env.exemple`), lu au démarrage et ignoré par Git.
 
 ## Architecture
 
@@ -528,6 +588,7 @@ Les rapports sont écrits dans `out/` : `rapport-<date>.md` (lisible) et
 | `betbot/sources/bookmakers.py` | cotes Unibet (listing 1 N 2 + marchés de la page match), CSV manuel, appariement des noms d'équipes |
 | `betbot/poisson.py` | buts attendus, 1X2, over 2.5, BTTS, score le plus probable |
 | `betbot/llm.py` | client LM Studio + prompt système « analyste rigoureux » |
+| `betbot/share.py` | conversion du rapport en HTML, envoi SMTP, publication WordPress |
 | `betbot/pipeline.py` | orchestration, dégradation propre si une source manque |
 | `betbot/report.py` | rapport Markdown + export JSON |
 

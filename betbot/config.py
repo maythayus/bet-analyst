@@ -24,6 +24,25 @@ if getattr(sys, "frozen", False):
         "PLAYWRIGHT_BROWSERS_PATH", str(Path.home() / "AppData" / "Local" / "ms-playwright")
     )
 
+
+def _load_env_file(path: Path) -> None:
+    """Charge un fichier .env pose a cote du projet, sans ecraser l'environnement.
+
+    Les identifiants de messagerie et de WordPress n'ont rien a faire dans le depot ni
+    dans une ligne de commande : ce fichier est ignore par Git.
+    """
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#") or "=" not in entry:
+            continue
+        name, _, value = entry.partition("=")
+        os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_env_file(PROJECT_ROOT / ".env")
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -57,9 +76,45 @@ class ScrapeConfig:
 
 
 @dataclass
+class MailConfig:
+    """Envoi du rapport par courriel. Les valeurs par defaut visent Gmail.
+
+    Gmail refuse le mot de passe du compte : il faut un mot de passe d'application
+    (https://myaccount.google.com/apppasswords), a poser dans `.env` sous
+    `BETBOT_MAIL_PASSWORD`.
+    """
+
+    host: str = os.getenv("BETBOT_MAIL_HOST", "smtp.gmail.com")
+    port: int = int(os.getenv("BETBOT_MAIL_PORT", "587"))
+    user: str = os.getenv("BETBOT_MAIL_USER", "")
+    password: str = os.getenv("BETBOT_MAIL_PASSWORD", "")
+    sender: str = os.getenv("BETBOT_MAIL_FROM", "")
+    recipients: str = os.getenv("BETBOT_MAIL_TO", "")
+    timeout: float = float(os.getenv("BETBOT_MAIL_TIMEOUT", "60"))
+
+
+@dataclass
+class WordPressConfig:
+    """Publication du rapport en article WordPress, via l'API REST.
+
+    L'authentification se fait avec un mot de passe d'application WordPress
+    (Utilisateurs > Profil > Mots de passe d'application), jamais le mot de passe du
+    compte. Les articles partent en brouillon : un pronostic se relit avant publication.
+    """
+
+    site: str = os.getenv("BETBOT_WP_SITE", "")
+    user: str = os.getenv("BETBOT_WP_USER", "")
+    password: str = os.getenv("BETBOT_WP_PASSWORD", "")
+    status: str = os.getenv("BETBOT_WP_STATUS", "draft")
+    categories: str = os.getenv("BETBOT_WP_CATEGORIES", "")
+
+
+@dataclass
 class AppConfig:
     lmstudio: LMStudioConfig = field(default_factory=LMStudioConfig)
     scrape: ScrapeConfig = field(default_factory=ScrapeConfig)
+    mail: MailConfig = field(default_factory=MailConfig)
+    wordpress: WordPressConfig = field(default_factory=WordPressConfig)
     output_dir: Path = DEFAULT_OUTPUT_DIR
     # Modele de buts : "forme" (celui d'origine) ou "marche" (cale sur les cotes).
     poisson_model: str = os.getenv("BETBOT_POISSON", "forme")

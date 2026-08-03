@@ -1,5 +1,7 @@
 out/
 .cache/
+# Identifiants de messagerie et de WordPress : jamais dans le depot.
+.env
 # Pages Forebet enregistrees a la main : personnelles et valables un seul jour.
 Forebet.htm
 Predictions*.htm
