@@ -34,6 +34,12 @@ from betbot.report import build_markdown
 from betbot.share import ShareError, markdown_to_html, publish_report, send_report
 from betbot.sources import bookmakers, flashscore
 from betbot.sources.forebet import parse_market_page, parse_predictions
+from betbot.sources.forebet_pages import (
+    FOREBET_PAGES,
+    ForebetSaveError,
+    _is_challenge,
+    _wait_for_human,
+)
 from betbot.sources.http import FetchError
 
 SAMPLE_HTML = """
@@ -194,6 +200,28 @@ class TestOpenReport(unittest.TestCase):
             mock.patch("betbot.cli.subprocess.run", side_effect=OSError("pas de bloc-notes")),
         ):
             open_report(Path("out") / "rapport.md")
+
+
+class TestForebetPages(unittest.TestCase):
+    """Enregistrement automatique des pages Forebet."""
+
+    def test_every_page_has_a_predictions_filename(self) -> None:
+        # C'est ce prefixe qui fait ramasser les fichiers par l'analyse suivante.
+        for filename, url in FOREBET_PAGES.items():
+            self.assertTrue(filename.startswith("Predictions"), filename)
+            self.assertTrue(filename.endswith(".htm"), filename)
+            self.assertTrue(url.startswith("https://www.forebet.com/"), url)
+
+    def test_the_cloudflare_wait_page_is_recognised(self) -> None:
+        self.assertTrue(_is_challenge("Just a moment...", "<html>cf-chl</html>"))
+        self.assertFalse(_is_challenge("Predictions 1X2 | Today Forebet Football", "<html>"))
+
+    def test_a_masked_window_stops_instead_of_saving_the_wait_page(self) -> None:
+        page = mock.Mock()
+        page.title.return_value = "Just a moment..."
+        page.content.return_value = "<html></html>"
+        with self.assertRaises(ForebetSaveError):
+            _wait_for_human(page, headless=True)
 
 
 class TestShare(unittest.TestCase):

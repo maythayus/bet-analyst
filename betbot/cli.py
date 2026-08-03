@@ -15,6 +15,7 @@ from betbot.config import AppConfig
 from betbot.pipeline import run
 from betbot.report import build_markdown, write_report
 from betbot.share import ShareError, publish_report, send_report
+from betbot.sources import forebet_pages
 from betbot.sources.http import FetchError
 
 # Avec --today, la journee entiere est analysee : ce plafond n'existe que pour eviter
@@ -192,6 +193,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="afficher le rapport dans la console en plus de l'ecrire dans out/",
     )
     parser.add_argument(
+        "--save-forebet",
+        action="store_true",
+        help="enregistrer d'abord les pages Forebet du jour avec un navigateur "
+        "(remplace le Ctrl+S manuel), puis analyser",
+    )
+    parser.add_argument(
+        "--save-forebet-only",
+        action="store_true",
+        help="enregistrer les pages Forebet du jour, puis quitter sans analyser",
+    )
+    parser.add_argument(
+        "--save-forebet-headless",
+        action="store_true",
+        help="enregistrer les pages sans afficher le navigateur ; a reserver a un profil "
+        "deja valide, personne ne pourra cliquer sur une verification",
+    )
+    parser.add_argument(
         "--install-chromium",
         action="store_true",
         help="telecharger le navigateur dont Flashscore a besoin, puis quitter",
@@ -261,6 +279,23 @@ def install_chromium() -> int:
     return 0
 
 
+def save_forebet_pages(cfg: AppConfig, *, headless: bool) -> list[Path]:
+    """Enregistre les pages Forebet du jour a cote du programme, comme un Ctrl+S.
+
+    Un echec n'arrete pas l'analyse : les pages de la veille, ou celles enregistrees a la
+    main, restent utilisables.
+    """
+    beside_exe = getattr(sys, "frozen", False)
+    destination = Path(sys.argv[0]).resolve().parent if beside_exe else Path.cwd()
+    try:
+        saved = forebet_pages.save_pages(destination, cfg.scrape, headless=headless)
+    except forebet_pages.ForebetSaveError as exc:
+        print(f"Pages Forebet non enregistrees : {exc}", file=sys.stderr)
+        return []
+    print(f"Pages Forebet enregistrees : {len(saved)} dans {destination}")
+    return saved
+
+
 def discover_market_pages() -> list[Path]:
     """Pages Forebet par marche posees a cote de l'executable ou dans le dossier courant.
 
@@ -295,9 +330,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.install_chromium:
         return install_chromium()
 
+    cfg = AppConfig()
+
+    if args.save_forebet or args.save_forebet_only:
+        saved = save_forebet_pages(cfg, headless=args.save_forebet_headless)
+        if args.save_forebet_only:
+            return 0 if saved else 2
+
     market_pages = args.forebet_market_html or discover_market_pages()
 
-    cfg = AppConfig()
     if args.matches:
         cfg.scrape.max_matches = args.matches
     elif args.today:

@@ -288,6 +288,47 @@ En ligne de commande, `--print` affiche le rapport en plus de l'écrire dans `ou
 associée aux fichiers `.md` sous Windows (Bloc-notes par défaut). `--no-open` supprime
 cette ouverture, par exemple dans une tâche planifiée.
 
+### Enregistrer les pages Forebet automatiquement
+
+`--save-forebet` remplace le Ctrl+S quotidien : un navigateur ouvre les cinq pages du
+jour, à quelques secondes d'intervalle, et enregistre le HTML dans le dossier du projet,
+que l'analyse ramasse ensuite toute seule.
+
+```powershell
+python -m betbot --save-forebet --from-unibet --today   # enregistre puis analyse
+python -m betbot --save-forebet-only                    # enregistre seulement
+```
+
+Le navigateur utilisé est le **Chrome installé sur la machine** (Chromium de Playwright à
+défaut), avec un profil dédié conservé dans `.cache\chrome-forebet` : les cookies
+Cloudflare restent valides d'un jour sur l'autre.
+
+**La première exécution se fait à la main, fenêtre visible** : Forebet peut afficher la
+vérification Cloudflare, à valider d'un clic ; le script attend 90 secondes. Les jours
+suivants, le profil passe généralement sans rien demander, et
+`--save-forebet-headless` permet alors de masquer la fenêtre. En mode masqué, une
+vérification qui réapparaît arrête la sauvegarde avec le message correspondant plutôt que
+d'enregistrer la page d'attente à la place des pronostics.
+
+Aucune protection n'est contournée : ni solveur de challenge, ni proxy tournant, ni faux
+navigateur. Ce sont des violations des conditions du site, elles cassent à chaque mise à
+jour de Cloudflare et finissent par faire bannir ton adresse IP. Si la vérification
+persiste, ouvre Forebet dans ton navigateur habituel, valide-la, et relance — ou reste au
+Ctrl+S manuel, qui fonctionne toujours.
+
+### Analyse quotidienne sans surveillance
+
+`analyse-quotidienne.cmd` enchaîne : enregistrement des pages Forebet, analyse de la
+journée, diffusion (courriel et WordPress selon le `.env`), sans ouvrir de fenêtre de
+texte à la fin. Pour le programmer chaque matin à 8 h :
+
+```powershell
+schtasks /create /tn "Bet.Bot" /tr "C:\Users\MI_K4\OneDrive\Documents\Bureau\bet-bot\analyse-quotidienne.cmd" /sc daily /st 08:00
+```
+
+Lance-le une première fois à la main : c'est le moment de valider la vérification
+Cloudflare, une fois pour toutes.
+
 ### Partager le rapport : courriel et WordPress
 
 Les identifiants ne se tapent pas en ligne de commande : copie `.env.exemple` en `.env`
@@ -589,6 +630,7 @@ projet (voir `.env.exemple`), lu au démarrage et ignoré par Git.
 | `betbot/poisson.py` | buts attendus, 1X2, over 2.5, BTTS, score le plus probable |
 | `betbot/llm.py` | client LM Studio + prompt système « analyste rigoureux » |
 | `betbot/share.py` | conversion du rapport en HTML, envoi SMTP, publication WordPress |
+| `betbot/sources/forebet_pages.py` | enregistrement des pages Forebet du jour avec un navigateur |
 | `betbot/pipeline.py` | orchestration, dégradation propre si une source manque |
 | `betbot/report.py` | rapport Markdown + export JSON |
 
