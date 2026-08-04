@@ -7,6 +7,7 @@ s'effondre tres vite, et c'est precisement ce que le module rend visible.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from math import prod
 
@@ -18,6 +19,9 @@ _SIGN_TO_MARKET = {"X": "N"}
 
 # Tailles de combines proposees en fin de rapport, en plus du ticket principal.
 VALUE_TICKET_SIZES = (6, 8)
+BTTS_YES = "Les deux marquent : oui"
+BTTS_NO = "Les deux marquent : non"
+BTTS_MIX_LABEL = "Combine 4 selections (2 x les deux marquent oui, 2 x non)"
 # Une selection a moins d'une chance sur deux n'a rien a faire dans un combine long :
 # huit selections a 50 % ne passent qu'une fois sur 256.
 MIN_LEG_PROBABILITY = 55.0
@@ -74,6 +78,8 @@ class Ticket:
     """Un combine et ses caracteristiques financieres."""
 
     legs: list[Leg] = field(default_factory=list)
+    # Titre du ticket dans le rapport, quand le nombre de selections ne le decrit pas.
+    label: str | None = None
 
     @property
     def probability(self) -> float:
@@ -234,6 +240,51 @@ def _priced_selections(
     if max_value is None:
         return legs
     return [leg for leg in legs if _leg_value(leg) <= max_value]
+
+
+def _market_legs(
+    bundles: list[MatchBundle], market: str, min_probability: float
+) -> list[Leg]:
+    """Selections cotees d'un seul marche, une par match, au-dessus du seuil de proba."""
+    legs: list[Leg] = []
+    for bundle in bundles:
+        if not bundle.poisson:
+            continue
+        probability = bundle.poisson.markets.get(market)
+        odds = bundle.best_odds().get(market)
+        if probability is None or probability < min_probability:
+            continue
+        if not odds or odds < MIN_LEG_ODDS:
+            continue
+        legs.append(Leg(bundle.label, market, probability, odds, bundle.stats.kickoff))
+    return legs
+
+
+def build_btts_mix_ticket(
+    bundles: list[MatchBundle],
+    *,
+    yes_legs: int = 2,
+    no_legs: int = 2,
+    min_leg_probability: float = MIN_LEG_PROBABILITY,
+) -> Ticket | None:
+    """Combine melant des « les deux marquent : oui » et des « non ».
+
+    Aucun match ne peut se retrouver des deux cotes : les deux issues sont
+    complementaires, donc passe le seuil d'un cote l'autre tombe sous les 50 %. Les
+    selections sont classees comme celles des autres combines : par esperance quand le
+    modele est cale sur les cotes, par probabilite sinon.
+
+    Renvoie None quand le jour ne fournit pas assez de matchs cotes de chaque cote :
+    mieux vaut pas de ticket qu'un ticket bricole.
+    """
+    rank: Callable[[Leg], float] = _leg_value if market_calibrated(bundles) else _leg_probability
+    chosen: list[Leg] = []
+    for market, count in ((BTTS_YES, yes_legs), (BTTS_NO, no_legs)):
+        legs = sorted(_market_legs(bundles, market, min_leg_probability), key=rank, reverse=True)
+        if len(legs) < count:
+            return None
+        chosen += legs[:count]
+    return _chronological(Ticket(chosen, label=BTTS_MIX_LABEL))
 
 
 def build_value_ticket(

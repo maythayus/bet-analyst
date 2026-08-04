@@ -95,6 +95,8 @@ class MatchStats:
     away_team: str
     kickoff: str | None = None
     competition: str | None = None
+    # Pays ou se joue la rencontre, tel que Flashscore classe la competition.
+    country: str | None = None
     home_form: TeamForm | None = None
     away_form: TeamForm | None = None
     head_to_head: list[str] = field(default_factory=list)
@@ -211,6 +213,7 @@ class MatchBundle:
             "match": self.label,
             "kickoff": self.stats.kickoff,
             "competition": self.stats.competition,
+            "country": self.stats.country,
             "flashscore": asdict(self.stats),
             "forebet": asdict(self.forebet) if self.forebet else None,
             "forebet_implied_from_odds": (

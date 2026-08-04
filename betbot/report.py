@@ -12,6 +12,7 @@ from betbot.combo import (
     MIN_LEG_PROBABILITY,
     VALUE_TICKET_SIZES,
     Ticket,
+    build_btts_mix_ticket,
     build_value_ticket,
     kelly_share,
     market_calibrated,
@@ -182,7 +183,7 @@ def _forebet_markets_block(bundle: MatchBundle) -> str:
     un signal de prudence, pas un arbitrage, aucune des deux estimations n'etant
     verifiable a l'avance.
     """
-    markets = bundle.forebet.markets
+    markets = bundle.forebet.markets if bundle.forebet else {}
     if not markets:
         return ""
 
@@ -341,13 +342,17 @@ def _ticket_block(ticket: Ticket, stake: float = 10.0) -> str:
 
 
 def value_tickets(bundles: list[MatchBundle]) -> list[Ticket]:
-    """Combines longs a marches melanges, un par taille proposee."""
-    tickets = (build_value_ticket(bundles, legs=size) for size in VALUE_TICKET_SIZES)
+    """Combines proposes en fin de rapport : le mixte « les deux marquent », puis les longs."""
+    tickets = [
+        build_btts_mix_ticket(bundles),
+        *(build_value_ticket(bundles, legs=size) for size in VALUE_TICKET_SIZES),
+    ]
     return [ticket for ticket in tickets if ticket and ticket.legs]
 
 
 def _ticket_to_dict(ticket: Ticket, stake: float = 10.0) -> dict:
     return {
+        "titre": ticket.label or f"Combine {len(ticket.legs)} selections",
         "selections": [
             {
                 "coup_denvoi": leg.kickoff,
@@ -375,7 +380,7 @@ def _value_tickets_block(bundles: list[MatchBundle]) -> list[str]:
     parts: list[str] = []
     for ticket in value_tickets(bundles):
         parts += [
-            f"## Combine {len(ticket.legs)} selections (marches melanges)",
+            f"## {ticket.label or f'Combine {len(ticket.legs)} selections (marches melanges)'}",
             _ticket_block(ticket),
             "",
             "---",
@@ -407,7 +412,12 @@ def build_markdown(
 
     for bundle, analysis in pairs:
         parts.append(f"## {bundle.label}")
-        meta = " | ".join(filter(None, [bundle.stats.competition, bundle.stats.kickoff]))
+        meta = " | ".join(
+            filter(
+                None,
+                [bundle.stats.country, bundle.stats.competition, bundle.stats.kickoff],
+            )
+        )
         if meta:
             parts.append(f"_{meta}_")
         parts += ["", "### Donnees", _form_block(bundle), "", _probability_table(bundle), ""]

@@ -409,6 +409,13 @@ signale. Quand la page du club retenu n'affiche aucun match joué (homonyme amat
 inactif), les candidats suivants sont essayés avant d'abandonner ; si aucun ne convient,
 le match est analysé sans statistiques et un avertissement le dit.
 
+**Heure, compétition et pays** viennent du calendrier Flashscore de l'équipe recevante,
+et non du bookmaker : l'en-tête de la page donne le pays et le nom complet de la
+compétition (« Angleterre | Premier League ») là où Forebet n'affiche qu'un code (`ECL`,
+`Kz2`). Ils s'affichent sous le titre de chaque match et sont repris dans le JSON
+(`country`, `competition`, `kickoff`). Quand la rencontre n'y figure pas, l'heure et la
+compétition du bookmaker sont conservées plutôt qu'inventées.
+
 ```powershell
 # toute la journée, en partant des cotes
 python -m betbot --from-unibet --today --combo 4 --combo-market "Les deux marquent : oui"
@@ -477,6 +484,18 @@ Lyon vs Rennes;1N et oui;2.35
 ```powershell
 python -m betbot --matches 20 --only-bettable --odds-csv cotes.csv
 ```
+
+### Combiné 4 « les deux marquent » oui et non
+
+Le rapport ouvre la série des combinés par un ticket de 4 sélections composé de **deux
+« les deux équipes marquent : oui » et deux « non »**, une par match. Les deux issues
+étant complémentaires, aucune rencontre ne peut figurer des deux côtés : au-delà de 50 %
+d'un côté, l'autre passe sous le seuil de 55 %.
+
+Les probabilités viennent du modèle, les cotes d'Unibet, et les pages Forebet
+« both to score » fournissent le second avis affiché dans le tableau de chaque match
+(colonnes `yes` et `no`). Si le jour n'offre pas deux matchs cotés de chaque côté, le
+ticket n'est pas construit : mieux vaut pas de combiné qu'un combiné bricolé.
 
 ### Combinés 6 et 8 sélections
 

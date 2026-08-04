@@ -16,7 +16,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import requests
@@ -29,6 +32,9 @@ log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://s.flashscore.com/search/"
 TEAM_URL = "https://www.flashscore.com/team/{slug}/{team_id}/results/"
+FIXTURES_URL = "https://www.flashscore.com/team/{slug}/{team_id}/fixtures/"
+# Heure d'un match a venir : « 03.08. 15:30 ».
+_FIXTURE_TIME = re.compile(r"(\d{2})\.(\d{2})\.\s*(\d{2}:\d{2})")
 FOOTBALL_SPORT_ID = 1
 # La recherche renvoie aussi des joueurs (type 2), dont le libelle ressemble a un club :
 # « Rousseau Thomas (Le Havre) » ne doit pas etre pris pour « Dunav Rousse ».
@@ -143,6 +149,15 @@ class Team:
     identifier: str
     slug: str
     title: str
+
+
+@dataclass(frozen=True)
+class Fixture:
+    """Rencontre a venir telle que Flashscore l'annonce."""
+
+    kickoff: str | None = None
+    competition: str | None = None
+    country: str | None = None
 
 
 @dataclass(frozen=True)
@@ -274,6 +289,12 @@ def _initial_runs(short: str, words: list[str]) -> list[str]:
     ]
 
 
+def _origin(title: str) -> str | None:
+    """Pays entre parentheses d'un libelle Flashscore : « Everton (Chile) » -> « Chile »."""
+    found = _COUNTRY.search(title)
+    return found.group(0).strip(" ()") if found else None
+
+
 def _starts(word: str, prefix: str) -> bool:
     return normalise(word).startswith(normalise(prefix)) and bool(normalise(prefix))
 
@@ -381,11 +402,60 @@ def _parse_results_page(page: Any, limit: int) -> list[PastMatch]:
     return matches
 
 
-def fetch_team_results(team: Team, cfg: ScrapeConfig, *, limit: int = 10) -> list[PastMatch]:
-    """Ouvre la page 'resultats' d'une equipe et lit ses derniers matchs joues."""
+def _kickoff_from(text: str, *, today: date | None = None) -> str | None:
+    """« 03.08. 15:30 » devient « 2026-08-03 15:30 », meme format que les bookmakers.
+
+    Flashscore omet l'annee : un match de janvier affiche en decembre appartient a
+    l'annee suivante.
+    """
+    found = _FIXTURE_TIME.search(text)
+    if not found:
+        return None
+    day, month, hour = int(found.group(1)), int(found.group(2)), found.group(3)
+    reference = today or date.today()
+    year = reference.year + 1 if month < reference.month - 6 else reference.year
+    return f"{year:04d}-{month:02d}-{day:02d} {hour}"
+
+
+def _parse_fixtures_page(page: Any, opponent: str) -> Fixture | None:
+    """Heure, competition et pays du prochain match contre `opponent`.
+
+    Les entetes de competition precedent les matchs qu'ils annoncent : la liste est donc
+    parcourue dans l'ordre du document, en retenant le dernier entete rencontre.
+    """
+    country: str | None = None
+    competition: str | None = None
+    wanted = _spaced(alias(opponent) or opponent)
+    for element in page.query_selector_all("div.headerLeague, div.event__match"):
+        classes = element.get_attribute("class") or ""
+        if "headerLeague" in classes:
+            origin = element.query_selector(".headerLeague__category-text")
+            name = element.query_selector(".headerLeague__title")
+            # Flashscore crie le pays : « ENGLAND » se lit mieux en « England ».
+            country = origin.inner_text().strip(" :\xa0").title() if origin else None
+            competition = name.inner_text().strip() if name else None
+            continue
+
+        teams = element.query_selector_all(
+            ".event__homeParticipant, .event__awayParticipant, .event__participant"
+        )
+        names = [_COUNTRY.sub("", node.inner_text().strip()) for node in teams]
+        if not any(similarity(*_expanded(wanted, name)) >= NAME_THRESHOLD for name in names):
+            continue
+        time_node = element.query_selector(".event__stageTime, .event__time")
+        return Fixture(
+            kickoff=_kickoff_from(time_node.inner_text()) if time_node else None,
+            competition=competition,
+            country=country,
+        )
+    return None
+
+
+@contextmanager
+def _flashscore_page(cfg: ScrapeConfig, url: str) -> Iterator[Any]:
+    """Page Playwright deja rendue sur `url`, fermee a la sortie du bloc."""
     try:
         from playwright.sync_api import Error as PlaywrightError
-        from playwright.sync_api import TimeoutError as PlaywrightTimeout
         from playwright.sync_api import sync_playwright
     except ImportError as exc:  # pragma: no cover - depend de l'installation
         raise FlashscoreUnavailable(
@@ -393,9 +463,7 @@ def fetch_team_results(team: Team, cfg: ScrapeConfig, *, limit: int = 10) -> lis
             "pip install playwright && playwright install chromium"
         ) from exc
 
-    url = TEAM_URL.format(slug=team.slug, team_id=team.identifier)
     log.info("Flashscore : %s", url)
-
     with sync_playwright() as playwright:
         try:
             browser = playwright.chromium.launch(
@@ -410,13 +478,43 @@ def fetch_team_results(team: Team, cfg: ScrapeConfig, *, limit: int = 10) -> lis
         page = browser.new_page(user_agent=USER_AGENT, locale="fr-FR")
         try:
             page.goto(url, timeout=cfg.flashscore_timeout_ms, wait_until="domcontentloaded")
-            try:
-                page.wait_for_selector("div.event__match", timeout=cfg.flashscore_timeout_ms)
-            except PlaywrightTimeout as exc:
-                raise FlashscoreUnavailable(f"Aucun match affiche sur {url}") from exc
-            return _parse_results_page(page, limit)
+            yield page
         finally:
             browser.close()
+
+
+def _matches_appeared(page: Any, cfg: ScrapeConfig) -> bool:
+    """Attend la liste des rencontres, rendue en JavaScript apres le chargement."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+    try:
+        page.wait_for_selector("div.event__match", timeout=cfg.flashscore_timeout_ms)
+    except PlaywrightTimeout:
+        return False
+    return True
+
+
+def fetch_next_fixture(team: Team, opponent: str, cfg: ScrapeConfig) -> Fixture | None:
+    """Calendrier d'une equipe : heure, competition et pays du match contre `opponent`.
+
+    Renvoie None si la rencontre n'y figure pas : le pipeline garde alors les valeurs du
+    bookmaker plutot que d'inventer une heure.
+    """
+    url = FIXTURES_URL.format(slug=team.slug, team_id=team.identifier)
+    with _flashscore_page(cfg, url) as page:
+        if not _matches_appeared(page, cfg):
+            log.info("Flashscore : aucun match a venir affiche sur %s", url)
+            return None
+        return _parse_fixtures_page(page, opponent)
+
+
+def fetch_team_results(team: Team, cfg: ScrapeConfig, *, limit: int = 10) -> list[PastMatch]:
+    """Ouvre la page 'resultats' d'une equipe et lit ses derniers matchs joues."""
+    url = TEAM_URL.format(slug=team.slug, team_id=team.identifier)
+    with _flashscore_page(cfg, url) as page:
+        if not _matches_appeared(page, cfg):
+            raise FlashscoreUnavailable(f"Aucun match affiche sur {url}")
+        return _parse_results_page(page, limit)
 
 
 def team_with_results(
@@ -486,12 +584,24 @@ def fetch_match_stats(
 
     home, home_matches = team_with_results(home_choices, cfg)
     away, away_matches = team_with_results(away_choices, cfg)
+    away_title = away.title.split(" (")[0]
+
+    fixture = Fixture()
+    try:
+        fixture = fetch_next_fixture(home, away_title, cfg) or Fixture()
+    except (FlashscoreUnavailable, OSError, ValueError) as exc:
+        log.info("Flashscore : calendrier de %s illisible (%s)", home.title, exc)
 
     return MatchStats(
         home_team=home_team,
         away_team=away_team,
+        kickoff=fixture.kickoff,
+        competition=fixture.competition,
+        # Le pays de l'entete du calendrier, sinon celui accole au nom de l'equipe
+        # recevante : une coupe d'Europe n'en designe aucun, le stade si.
+        country=fixture.country or _origin(home.title),
         home_form=build_form(home.title.split(" (")[0], home_matches),
-        away_form=build_form(away.title.split(" (")[0], away_matches),
-        head_to_head=head_to_head(home_matches, away.title.split(" (")[0]),
+        away_form=build_form(away_title, away_matches),
+        head_to_head=head_to_head(home_matches, away_title),
         url=TEAM_URL.format(slug=home.slug, team_id=home.identifier),
     )

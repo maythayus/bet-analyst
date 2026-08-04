@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import date
 from math import exp, factorial
 from pathlib import Path
 from typing import ClassVar
@@ -15,13 +16,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betbot import demo, poisson
 from betbot.cli import discover_market_pages, open_report
-from betbot.combo import KELLY_MAX_SHARE, build_ticket, build_value_ticket, kelly_share
+from betbot.combo import (
+    BTTS_NO,
+    BTTS_YES,
+    KELLY_MAX_SHARE,
+    build_btts_mix_ticket,
+    build_ticket,
+    build_value_ticket,
+    kelly_share,
+)
 from betbot.config import AppConfig, MailConfig, ScrapeConfig, WordPressConfig
 from betbot.models import (
     BookmakerLine,
     ForebetPrediction,
     MatchBundle,
     MatchStats,
+    PoissonResult,
     TeamForm,
 )
 from betbot.pipeline import (
@@ -870,6 +880,75 @@ class TestValueTicket(unittest.TestCase):
         assert ticket is not None
         self.assertTrue(all(leg.market != "2" for leg in ticket.legs))
         self.assertTrue(all(leg.probability >= 55.0 for leg in ticket.legs))
+
+
+class TestBttsMixTicket(unittest.TestCase):
+    """Combine 4 : deux fois « les deux marquent : oui », deux fois « non »."""
+
+    def _bundle(self, index: int, btts: float) -> MatchBundle:
+        """Match dont le modele est remplace par une probabilite BTTS imposee."""
+        stats = MatchStats(
+            home_team=f"Equipe {index}",
+            away_team=f"Visiteur {index}",
+            kickoff=f"2026-07-26 1{index}:00",
+        )
+        return MatchBundle(
+            stats=stats,
+            poisson=PoissonResult(
+                prob_home=40.0,
+                prob_draw=30.0,
+                prob_away=30.0,
+                prob_over_25=50.0,
+                prob_btts=btts,
+                expected_home_goals=1.4,
+                expected_away_goals=1.1,
+                most_likely_score="1-1",
+                markets={BTTS_YES: btts, BTTS_NO: 100 - btts},
+            ),
+            bookmakers=[BookmakerLine(bookmaker="Unibet", odds={BTTS_YES: 1.60, BTTS_NO: 2.20})],
+        )
+
+    def test_two_legs_of_each_side_from_four_matches(self) -> None:
+        bundles = [self._bundle(0, 80.0), self._bundle(1, 70.0)]
+        bundles += [self._bundle(2, 20.0), self._bundle(3, 30.0)]
+        ticket = build_btts_mix_ticket(bundles)
+        assert ticket is not None
+        markets = [leg.market for leg in ticket.legs]
+        self.assertEqual(markets.count(BTTS_YES), 2)
+        self.assertEqual(markets.count(BTTS_NO), 2)
+        self.assertEqual(len({leg.match for leg in ticket.legs}), 4)
+
+    def test_no_ticket_when_one_side_is_missing(self) -> None:
+        bundles = [self._bundle(index, 80.0) for index in range(4)]
+        self.assertIsNone(build_btts_mix_ticket(bundles))
+
+    def test_the_likeliest_legs_win_with_the_form_model(self) -> None:
+        bundles = [self._bundle(0, 90.0), self._bundle(1, 80.0), self._bundle(2, 60.0)]
+        bundles += [self._bundle(3, 10.0), self._bundle(4, 20.0), self._bundle(5, 40.0)]
+        ticket = build_btts_mix_ticket(bundles)
+        assert ticket is not None
+        self.assertEqual(
+            sorted(leg.probability for leg in ticket.legs), [80.0, 80.0, 90.0, 90.0]
+        )
+
+
+class TestFlashscoreKickoff(unittest.TestCase):
+    """Heure de coup d'envoi lue sur Flashscore, sans annee affichee."""
+
+    def test_day_and_month_take_the_current_year(self) -> None:
+        self.assertEqual(
+            flashscore._kickoff_from("03.08. 15:30", today=date(2026, 7, 25)),
+            "2026-08-03 15:30",
+        )
+
+    def test_january_seen_in_december_belongs_to_the_next_year(self) -> None:
+        self.assertEqual(
+            flashscore._kickoff_from("04.01. 20:45", today=date(2026, 12, 20)),
+            "2027-01-04 20:45",
+        )
+
+    def test_a_played_match_has_no_kickoff(self) -> None:
+        self.assertIsNone(flashscore._kickoff_from("Termine"))
 
 
 class TestFlashscoreSearch(unittest.TestCase):
