@@ -6,6 +6,26 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+@dataclass(frozen=True)
+class PlayedMatch:
+    """Un match deja joue, vu du cote de l'une des deux equipes.
+
+    Garder le detail match par match, et pas seulement des moyennes, est ce qui permet
+    de ponderer les rencontres recentes, de separer domicile et exterieur et de tenir
+    compte du niveau de l'adversaire.
+    """
+
+    opponent: str
+    scored: int
+    conceded: int
+    at_home: bool
+    date: str = ""
+
+    @property
+    def result(self) -> str:
+        return "W" if self.scored > self.conceded else "D" if self.scored == self.conceded else "L"
+
+
 @dataclass
 class TeamForm:
     """Forme recente d'une equipe, telle qu'extraite de Flashscore."""
@@ -15,10 +35,9 @@ class TeamForm:
     goals_for: int = 0
     goals_against: int = 0
     matches_played: int = 0
-    home_goals_for: float | None = None
-    home_goals_against: float | None = None
-    away_goals_for: float | None = None
-    away_goals_against: float | None = None
+    # Matchs retenus, du plus recent au plus ancien. Vide quand seules les moyennes sont
+    # connues : le modele retombe alors sur elles.
+    matches: list[PlayedMatch] = field(default_factory=list)
 
     @property
     def avg_goals_for(self) -> float:
@@ -133,6 +152,10 @@ class MatchStats:
     head_to_head: list[str] = field(default_factory=list)
     home_table: TableStanding | None = None
     away_table: TableStanding | None = None
+    # Classement complet de la competition : il donne le niveau des adversaires
+    # rencontres, sans quoi trois buts contre le dernier valent trois buts contre le
+    # leader.
+    standings: list[TableStanding] = field(default_factory=list)
     url: str | None = None
 
     @property

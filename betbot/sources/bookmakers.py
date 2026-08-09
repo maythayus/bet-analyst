@@ -19,14 +19,16 @@ import time
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
-from difflib import SequenceMatcher
 from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
 
 from betbot.config import USER_AGENT, ScrapeConfig
+from betbot.names import SIMILARITY_THRESHOLD, normalise, similarity, teams_match
 from betbot.poisson import FIRST_HALF_BTTS
+
+__all__ = ["SIMILARITY_THRESHOLD", "normalise", "similarity", "teams_match"]
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +54,6 @@ UNIBET_HEADERS = {
 }
 UNIBET_SITE = "https://www.unibet.fr"
 WIN_DRAW_WIN = "WIN_DRAW_WIN"
-SIMILARITY_THRESHOLD = 0.6
 DRAW_LABELS = {"match nul", "nul", "draw", "x", "n"}
 YES_LABELS = {"oui", "yes"}
 NO_LABELS = {"non", "no"}
@@ -78,64 +79,6 @@ HALF_BTTS_TITLE = re.compile(r"^les 2 equipes marqueront elles \? - periodes$")
 GOALS_CLAUSE = re.compile(r"\b(plus|moins)\s+(?:de\s+)?(\d)[.,](\d)\s*(?:buts?)?$")
 # Doubles chances : la paire de signes, triee, donne le nom du marche.
 DOUBLE_CHANCE = {("1", "N"): "1N", ("1", "2"): "12", ("2", "N"): "N2"}
-
-# Suffixes et prefixes de club sans valeur discriminante. "City" et "United" en sont
-# volontairement absents : ils distinguent des clubs d'une meme ville.
-_NOISE = re.compile(
-    r"\b(fc|cf|sc|ac|as|ss|us|sv|if|fk|sk|nk|hk|bk|afc|cd|ud|rc|rcd|club"
-    r"|pfk|pfc|ofk|mfk|msk|bsc|vfb|vfl|fsv|tsv|tsg|ssc)\b"
-)
-# Annee de fondation accolee au nom : « FK DAC 1904 » et « DAC Dunajska Streda ».
-_FOUNDED = re.compile(r"\b(1[89]|20)\d{2}\b")
-TOKEN_THRESHOLD = 0.75
-ABBREVIATION_LENGTH = 2
-PREFIX_LENGTH = 4
-
-
-def normalise(name: str) -> str:
-    """Cle de comparaison insensible aux accents, ponctuations et suffixes de club."""
-    text = unicodedata.normalize("NFKD", name.lower())
-    text = "".join(char for char in text if not unicodedata.combining(char))
-    text = re.sub(r"[^a-z0-9 ]+", " ", text)
-    text = _FOUNDED.sub(" ", text)
-    text = _NOISE.sub(" ", text)
-    return " ".join(text.split())
-
-
-def _same_token(left: str, right: str) -> bool:
-    if left == right:
-        return True
-    shortest, longest = sorted((left, right), key=len)
-    if longest.startswith(shortest) and (
-        len(shortest) >= PREFIX_LENGTH or len(shortest) <= ABBREVIATION_LENGTH
-    ):
-        # « U. Cluj » pour Universitatea Cluj : une initiale suivie d'un point est une
-        # abreviation courante des grilles de cotes comme de Flashscore.
-        return True
-    return SequenceMatcher(None, left, right).ratio() >= TOKEN_THRESHOLD
-
-
-def similarity(left: str, right: str) -> float:
-    """Score de 0 a 1 entre deux libelles d'equipe, une fois normalises.
-
-    Le score compte la part des mots du libelle le plus court retrouves dans l'autre :
-    « Rennes » correspond a « Stade Rennais », mais « Manchester City » ne correspond
-    pas a « Manchester United », dont un mot sur deux seulement concorde.
-    """
-    left_key, right_key = normalise(left), normalise(right)
-    if not left_key or not right_key:
-        return 0.0
-    if left_key == right_key or left_key in right_key or right_key in left_key:
-        return 1.0
-
-    shortest, longest = sorted((left_key.split(), right_key.split()), key=len)
-    matched = sum(1 for token in shortest if any(_same_token(token, other) for other in longest))
-    return matched / len(shortest)
-
-
-def teams_match(left: str, right: str) -> bool:
-    """Vrai si deux libelles d'equipe designent probablement le meme club."""
-    return similarity(left, right) >= SIMILARITY_THRESHOLD
 
 
 @dataclass

@@ -14,13 +14,13 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from betbot import demo, poisson, trap
+from betbot import consensus, demo, poisson, strength, trap
 from betbot.cli import discover_market_pages, open_report
 from betbot.combo import (
     BTTS_NO,
     BTTS_YES,
     KELLY_MAX_SHARE,
-    SOURCE_FOREBET,
+    SOURCE_CONSENSUS,
     SOURCE_MODEL,
     _leg_for,
     build_btts_mix_ticket,
@@ -34,6 +34,7 @@ from betbot.models import (
     ForebetPrediction,
     MatchBundle,
     MatchStats,
+    PlayedMatch,
     PoissonResult,
     TableStanding,
     TeamForm,
@@ -483,8 +484,13 @@ class TestMarketCalibration(unittest.TestCase):
         self.assertLess(sum(sum(row) for row in matrix), 1.0)
         self.assertAlmostEqual(matrix[2][1], exp(-3.5) * 3.5**2 / 2 * exp(-2.8) * 2.8, places=12)
 
-    def test_the_form_model_btts_matches_the_v1_formula(self) -> None:
-        """« Les deux marquent : oui » doit rester le produit de deux Poisson tronquees."""
+    def test_the_form_model_applies_dixon_coles(self) -> None:
+        """Le modele de forme corrige lui aussi les scores serres, comme celui du marche.
+
+        Deux Poisson independantes sous-estiment le 0-0 et le 1-1, les deux scores les
+        plus frequents du football. La correction leur redonne du poids, ce qui deplace
+        les marches joues ici : « les deux marquent » et les doubles chances.
+        """
         prolific = TeamForm(
             name="A", last_results=["W"] * 5, goals_for=12, goals_against=9, matches_played=5
         )
@@ -497,13 +503,23 @@ class TestMarketCalibration(unittest.TestCase):
         def scores_at_least_once(lam: float) -> float:
             return sum(exp(-lam) * lam**goals / factorial(goals) for goals in range(1, 9))
 
-        expected = 100 * (
-            scores_at_least_once(result.expected_home_goals)
-            * scores_at_least_once(result.expected_away_goals)
+        def btts_of(matrix: list[list[float]]) -> float:
+            total = sum(sum(row) for row in matrix)
+            scored = sum(matrix[home][away] for home in range(1, 9) for away in range(1, 9))
+            return 100 * scored / total
+
+        goals = (result.expected_home_goals, result.expected_away_goals)
+        corrected = poisson.score_matrix(*goals)
+        independent = poisson.score_matrix(*goals, dixon_coles=False)
+        self.assertGreater(corrected[0][0], independent[0][0])
+        self.assertGreater(corrected[1][1], independent[1][1])
+        # Le modele publie bien la valeur corrigee, aux arrondis pres.
+        self.assertAlmostEqual(
+            result.markets["Les deux marquent : oui"], btts_of(corrected), delta=0.1
         )
-        # Les buts attendus sont publies arrondis au centieme : la comparaison ne peut
-        # pas etre plus fine que l'arrondi lui-meme.
-        self.assertAlmostEqual(result.markets["Les deux marquent : oui"], expected, delta=0.1)
+        # L'ancienne formule, produit de deux Poisson tronquees, en differe desormais.
+        v1 = 100 * scores_at_least_once(goals[0]) * scores_at_least_once(goals[1])
+        self.assertNotAlmostEqual(result.markets["Les deux marquent : oui"], v1, delta=0.1)
 
 
 class TestCombinedMarkets(unittest.TestCase):
@@ -813,9 +829,13 @@ class TestCombo(unittest.TestCase):
         self.assertAlmostEqual(ticket.fair_odds, 100 / ticket.probability, places=1)
 
     def test_market_option_forces_every_leg(self) -> None:
-        ticket = build_ticket(self.bundles, legs=2, market="Les deux marquent : oui")
+        ticket = build_ticket(self.bundles, legs=2, market="Plus de 1.5 buts")
         assert ticket is not None
-        self.assertTrue(all(leg.market == "Les deux marquent : oui" for leg in ticket.legs))
+        self.assertTrue(all(leg.market == "Plus de 1.5 buts" for leg in ticket.legs))
+
+    def test_a_market_nobody_agrees_on_yields_no_ticket(self) -> None:
+        """Forebet et le modele se contredisent sur le BTTS de la demo : rien n'est bati."""
+        self.assertIsNone(build_ticket(self.bundles, legs=2, market=BTTS_YES))
 
     def test_legs_are_ordered_by_kickoff(self) -> None:
         ticket = build_ticket(self.bundles, legs=2)
@@ -937,7 +957,7 @@ class TestBttsMixTicket(unittest.TestCase):
 
 
 class TestForebetSourcedLegs(unittest.TestCase):
-    """Sur les marches que Forebet publie, sa probabilite prime, a partir de 60 %."""
+    """Sur les marches que Forebet publie, les deux sources sont reunies, des 60 %."""
 
     def _bundle(self, *, model: float, forebet: float | None) -> MatchBundle:
         stats = MatchStats(home_team="Equipe", away_team="Visiteur", kickoff="2026-07-26 18:00")
@@ -967,20 +987,135 @@ class TestForebetSourcedLegs(unittest.TestCase):
             bookmakers=[BookmakerLine(bookmaker="Unibet", odds={BTTS_YES: 1.60, BTTS_NO: 2.20})],
         )
 
-    def test_forebet_probability_replaces_the_model(self) -> None:
-        bundle = self._bundle(model=85.0, forebet=64.0)
-        leg = _leg_for(bundle, BTTS_YES, 1.60, 55.0)
+    def test_the_two_sources_are_averaged_when_they_agree(self) -> None:
+        """Forebet pese 60 %, le modele 40 % : c'est la valeur retenue, pas l'une des deux."""
+        leg = _leg_for(self._bundle(model=72.0, forebet=66.0), BTTS_YES, 1.60, 55.0)
         assert leg is not None
-        self.assertEqual((leg.probability, leg.source), (64.0, SOURCE_FOREBET))
+        self.assertEqual((leg.probability, leg.source), (68.4, SOURCE_CONSENSUS))
 
-    def test_below_sixty_percent_forebet_rejects_the_selection(self) -> None:
-        """Le modele a beau etre enthousiaste, c'est Forebet qui decide sur ce marche."""
-        self.assertIsNone(_leg_for(self._bundle(model=90.0, forebet=58.0), BTTS_YES, 1.60, 55.0))
+    def test_a_disagreement_leaves_the_market_alone(self) -> None:
+        """Vingt points d'ecart : l'un des deux se trompe lourdement, on ne joue pas."""
+        self.assertIsNone(_leg_for(self._bundle(model=90.0, forebet=64.0), BTTS_YES, 1.60, 55.0))
+
+    def test_below_sixty_percent_the_selection_is_rejected(self) -> None:
+        """Un consensus a 59 % ne suffit pas, meme si les deux sources se rejoignent."""
+        self.assertIsNone(_leg_for(self._bundle(model=58.0, forebet=59.0), BTTS_YES, 1.60, 55.0))
 
     def test_the_model_still_answers_where_forebet_says_nothing(self) -> None:
-        leg = _leg_for(self._bundle(model=70.0, forebet=None), BTTS_YES, 1.60, 55.0)
+        """Sans Forebet, le modele decide seul, au seuil habituel et non a 60 %."""
+        leg = _leg_for(self._bundle(model=57.0, forebet=None), BTTS_YES, 1.60, 55.0)
         assert leg is not None
-        self.assertEqual((leg.probability, leg.source), (70.0, SOURCE_MODEL))
+        self.assertEqual((leg.probability, leg.source), (57.0, SOURCE_MODEL))
+
+
+class TestTeamStrength(unittest.TestCase):
+    """Force mesuree sur vingt matchs : anciennete, lieu, adversaires et saison."""
+
+    LEADER: ClassVar[TableStanding] = TableStanding(
+        name="Leader", position=1, played=20, wins=16, draws=2, goals_for=44, goals_against=12
+    )
+    LAST: ClassVar[TableStanding] = TableStanding(
+        name="Dernier", position=20, played=20, wins=2, draws=3, goals_for=14, goals_against=46
+    )
+
+    def _form(self, matches: list[PlayedMatch]) -> TeamForm:
+        return TeamForm(
+            name="Equipe",
+            last_results=[match.result for match in matches[:5]],
+            goals_for=sum(match.scored for match in matches),
+            goals_against=sum(match.conceded for match in matches),
+            matches_played=len(matches),
+            matches=matches,
+        )
+
+    def test_recent_matches_weigh_more(self) -> None:
+        """Trois buts la semaine derniere ne valent pas trois buts il y a six mois."""
+        improving = self._form(
+            [PlayedMatch("X", 3, 0, at_home=True)] * 3 + [PlayedMatch("X", 0, 0, at_home=True)] * 12
+        )
+        declining = self._form(
+            [PlayedMatch("X", 0, 0, at_home=True)] * 12 + [PlayedMatch("X", 3, 0, at_home=True)] * 3
+        )
+        rising = strength.team_rates(improving, at_home=True)
+        falling = strength.team_rates(declining, at_home=True)
+        assert rising is not None and falling is not None
+        self.assertGreater(rising.scored, falling.scored)
+        # Les deux equipes ont le meme total de buts : seule leur repartition differe.
+        self.assertEqual(improving.goals_for, declining.goals_for)
+
+    def test_home_and_away_form_are_distinguished(self) -> None:
+        """Une equipe qui marque a domicile et rien dehors n'est pas la meme au deplacement."""
+        matches = [PlayedMatch("X", 3, 0, at_home=True), PlayedMatch("X", 0, 2, at_home=False)] * 6
+        form = self._form(matches)
+        home = strength.team_rates(form, at_home=True)
+        away = strength.team_rates(form, at_home=False)
+        assert home is not None and away is not None
+        self.assertGreater(home.scored, away.scored)
+        self.assertLess(home.conceded, away.conceded)
+
+    def test_goals_against_the_last_are_worth_less(self) -> None:
+        """Le plus gros gain de justesse : deux buts contre qui, exactement ?"""
+        standings = [self.LEADER, self.LAST]
+        against_last = self._form([PlayedMatch("Dernier", 2, 0, at_home=True)] * 10)
+        against_leader = self._form([PlayedMatch("Leader", 2, 0, at_home=True)] * 10)
+        weak = strength.team_rates(against_last, at_home=True, standings=standings)
+        strong = strength.team_rates(against_leader, at_home=True, standings=standings)
+        assert weak is not None and strong is not None
+        self.assertLess(weak.scored, strong.scored)
+        # La correction est bornee : le classement reste une mesure grossiere.
+        self.assertLess(strong.scored / weak.scored, 3.0)
+
+    def test_an_unknown_opponent_is_not_corrected(self) -> None:
+        """Un club d'une autre division, absent du classement, ne se corrige pas au hasard."""
+        self.assertIsNone(strength.opponent_factors("Club inconnu", [self.LEADER, self.LAST]))
+
+    def test_the_season_anchors_a_short_form(self) -> None:
+        """Deux matchs ne font pas une force : le classement pese alors davantage."""
+        table = TableStanding(
+            name="Equipe", position=8, played=20, wins=8, draws=5, goals_for=20, goals_against=22
+        )
+        short = self._form([PlayedMatch("X", 4, 0, at_home=True)] * 2)
+        anchored = strength.team_rates(short, at_home=True, table=table)
+        raw = strength.team_rates(short, at_home=True)
+        assert anchored is not None and raw is not None
+        self.assertLess(anchored.scored, raw.scored)
+        self.assertGreater(anchored.scored, table.scored_per_game or 0.0)
+
+    def test_averages_alone_still_work(self) -> None:
+        """Sans detail match par match, les moyennes brutes sont renvoyees telles quelles."""
+        form = TeamForm(name="Equipe", goals_for=8, goals_against=4, matches_played=4)
+        rates = strength.team_rates(form, at_home=True)
+        assert rates is not None
+        self.assertEqual((rates.scored, rates.conceded), (2.0, 1.0))
+
+
+class TestConsensus(unittest.TestCase):
+    """Forebet et le modele reunis en une valeur, ou ecartes quand ils se contredisent."""
+
+    def test_the_average_is_weighted_towards_forebet(self) -> None:
+        agreed = consensus.blend(70.0, 60.0)
+        assert agreed is not None
+        self.assertEqual((agreed.probability, agreed.source), (66.0, consensus.SOURCE_CONSENSUS))
+        self.assertEqual(agreed.gap, 10.0)
+
+    def test_the_consensus_never_exceeds_the_higher_source(self) -> None:
+        """Reunir deux avis ne cree pas de certitude : la valeur reste entre les deux."""
+        agreed = consensus.blend(72.0, 61.0)
+        assert agreed is not None
+        self.assertLessEqual(agreed.probability, 72.0)
+        self.assertGreaterEqual(agreed.probability, 61.0)
+
+    def test_a_wide_gap_yields_nothing(self) -> None:
+        self.assertIsNone(consensus.blend(80.0, 50.0))
+
+    def test_a_single_source_is_kept_as_is(self) -> None:
+        only_forebet = consensus.blend(64.0, None)
+        only_model = consensus.blend(None, 64.0)
+        assert only_forebet is not None and only_model is not None
+        self.assertEqual(only_forebet.source, consensus.SOURCE_FOREBET)
+        self.assertEqual(only_model.source, consensus.SOURCE_MODEL)
+        self.assertFalse(only_forebet.agreed)
+        self.assertIsNone(consensus.blend(None, None))
 
 
 class TestTraps(unittest.TestCase):

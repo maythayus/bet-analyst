@@ -18,8 +18,8 @@ Il **croise quatre sources** pour chaque rencontre pariable :
 
 1. **Forebet** — les probabilités publiées par un site de pronostics, prises comme un
    avis extérieur, pas comme une vérité. URLS pour le fichiers Forebet.htm = https://www.forebet.com/en/football-tips-and-predictions-for-today/predictions-both-to-score
-2. **Flashscore** — les statistiques brutes : cinq derniers matchs de chaque équipe,
-   buts marqués et encaissés, confrontations directes, classement de la compétition
+2. **Flashscore** — les statistiques brutes : vingt derniers matchs de chaque équipe
+   (adversaire, lieu et score de chacun), confrontations directes, classement de la compétition
    (position, points, buts encaissés sur la saison), et l'heure, la compétition et le
    pays de la rencontre.
 3. **Modèle de Poisson** — un calcul maison qui déduit la probabilité de chaque marché
@@ -46,7 +46,7 @@ Deux estimations de ces buts attendus sont disponibles, au choix (`--poisson`) :
 
 | Modèle | Ce qu'il fait | Ce qu'il donne |
 | --- | --- | --- |
-| `forme` (défaut) | deux lois de Poisson nourries par les cinq derniers matchs, les cotes ne servent qu'à mesurer l'écart | probabilités tranchées, beaucoup de valeur affichée, une partie étant de l'erreur d'estimation |
+| `forme` (défaut) | deux lois de Poisson nourries par les vingt derniers matchs, les cotes ne servent qu'à mesurer l'écart | probabilités tranchées, beaucoup de valeur affichée, une partie étant de l'erreur d'estimation |
 | `marche` | matrice calée sur les cotes dont la marge a été retirée, forme en ajustement borné | reproduit le marché à ~2 points près, donc presque jamais de pari à espérance positive |
 
 Le modèle `forme` est celui des premières versions : c'est lui qui produit les combinés
@@ -54,21 +54,40 @@ Le modèle `forme` est celui des premières versions : c'est lui qui produit les
 au-delà d'une dizaine de points, cet écart mesure d'abord l'incertitude du modèle, pas
 une occasion. `--poisson marche` donne la lecture prudente du même match.
 
-Deux corrections disponibles par rapport à un Poisson d'école, actives sur `marche` :
+Corrections apportées à un Poisson d'école :
 
-- **Dixon-Coles** : deux lois de Poisson indépendantes sous-estiment les scores serrés
-  (0-0, 1-0, 0-1, 1-1). Le modèle leur rend leur poids, ce qui corrige surtout le
-  « les deux marquent : non », auparavant sous-estimé de près de 16 points.
-- **Calage sur les cotes** : quand un groupe d'issues exhaustif est coté (1 N 2, une
-  ligne de buts, BTTS oui/non), la marge du bookmaker est retirée puis les buts attendus
-  sont ajustés pour reproduire ces probabilités. La forme récente ne sert plus qu'à un
-  écart borné (25 % de poids, 12 % d'amplitude maximale).
+- **Dixon-Coles**, sur les deux modèles : deux lois de Poisson indépendantes
+  sous-estiment les scores serrés (0-0, 1-0, 0-1, 1-1). Le modèle leur rend leur poids,
+  ce qui corrige surtout le « les deux marquent : non », auparavant sous-estimé de près
+  de 16 points.
+- **Calage sur les cotes**, sur `marche` : quand un groupe d'issues exhaustif est coté
+  (1 N 2, une ligne de buts, BTTS oui/non), la marge du bookmaker est retirée puis les
+  buts attendus sont ajustés pour reproduire ces probabilités. La forme récente ne sert
+  plus qu'à un écart borné (25 % de poids, 12 % d'amplitude maximale).
+
+### Comment la forme est mesurée
+
+Une moyenne de buts sur cinq matchs était le principal défaut du modèle : elle comptait
+à l'identique un match d'il y a une semaine et un d'il y a trois mois, une réception du
+dernier et un déplacement chez le leader, un match à domicile et un à l'extérieur.
+Quatre corrections sont appliquées (`betbot/strength.py`), dans cet ordre :
+
+| Correction | Ce qu'elle change |
+| --- | --- |
+| **Vingt matchs, pondérés par l'ancienneté** | chaque match plus vieux pèse 0.93 fois le précédent : de la matière sans que la saison passée dicte la forme du jour |
+| **Domicile / extérieur** | les matchs joués dans le même contexte que la rencontre à venir comptent 1.6 fois plus |
+| **Force des adversaires** | les buts marqués sont divisés par la perméabilité de la défense affrontée, les encaissés par le tranchant de l'attaque affrontée, d'après le classement de la saison (facteur borné entre 0.65 et 1.55) |
+| **Ancrage sur la saison** | la mesure est rapprochée des buts de la saison entière, d'autant plus fort que l'échantillon est mince (prior de 6 matchs) |
+
+Aucune de ces corrections n'invente d'information : elles rendent les probabilités plus
+**justes**, pas plus élevées. Un match indécis le reste, et un adversaire absent du
+classement (coupe, autre division) n'est pas corrigé au hasard.
 
 Chaque match indique donc l'origine de son estimation :
 
 | Source affichée | Signification |
 | --- | --- |
-| `forme recente` | modèle par défaut : cinq matchs de forme, sans référence aux cotes |
+| `forme recente` | modèle par défaut : vingt matchs de forme corrigée, sans référence aux cotes |
 | `cotes` | calée sur le marché, aucune donnée de forme exploitable |
 | `cotes + forme` | calée sur le marché, légèrement inclinée par la forme récente |
 | `forme seule` | `--poisson marche` sans aucune cote : ordre de grandeur, rien de plus |
@@ -93,16 +112,25 @@ reviendrait à choisir celles où il se trompe le plus. Dans les deux cas, une s
 sélection par match, aucune cote en dessous de 1.20, et la mise conseillée est un quart
 du critère de Kelly plafonné à 5 % du capital.
 
-### Forebet décide sur ses marchés, à partir de 60 %
+### Forebet et le modèle réunis, à partir de 60 %
 
 Sur les cinq marchés que Forebet publie lui-même — « les deux marquent » oui et non, et
-les trois doubles chances `1N`, `N2`, `12` — c'est **sa probabilité qui sert à composer
-les combinés**, et non celle du modèle : elle repose sur un historique bien plus large
-que cinq matchs de forme. Le seuil est de **60 %** ; en dessous, la sélection est
-écartée même si le modèle la juge très probable. Le rapport affiche la source de chaque
-sélection (`Forebet` ou `modele`) dans le tableau du ticket. Le modèle de Poisson reste
-inchangé : il continue de calculer et d'afficher tous ses marchés, et il reste seul sur
-ceux que Forebet ne publie pas.
+les trois doubles chances `1N`, `N2`, `12` — les deux estimations sont **réunies en une
+seule probabilité** (`betbot/consensus.py`) : Forebet pèse 60 %, le modèle 40 %. Deux
+sources indépendantes qui se rejoignent valent mieux que chacune isolément, et le seuil
+de sélection est de **60 %** sur ce consensus.
+
+À une condition, qui est tout l'intérêt du dispositif : **au-delà de 20 points d'écart,
+aucun consensus n'est calculé et le marché est écarté des combinés**. Une moyenne serait
+alors le pire des choix — une fausse tranquillité à mi-chemin de deux avis dont l'un se
+trompe lourdement. Le rapport affiche côte à côte la probabilité Forebet, celle du
+modèle, leur consensus ou la mention `desaccord (N pts)`, et le JSON reprend le détail
+(`consensus` par marché : `forebet`, `modele`, `consensus`, `ecart`, `source`,
+`desaccord`). Les valeurs brutes ne sont jamais remplacées par le consensus : masquer
+l'écart donnerait une assurance que ni l'une ni l'autre des sources n'a.
+
+Quand Forebet ne publie pas un marché (mi-temps, seuils de buts, scores), le modèle
+décide seul, au seuil habituel de 55 %.
 
 ### Matchs pièges
 
@@ -138,8 +166,11 @@ les deux régulièrement.
 - Une probabilité de 80 % veut dire que l'issue **ne se produit pas une fois sur cinq** ;
   se tromper n'est pas une anomalie, c'est prévu par le calcul.
 - Une « valeur » positive ne signifie rien en soi : elle suppose que mon modèle, bâti
-  sur cinq matchs de forme, soit mieux calibré qu'Unibet, qui dispose de bien plus de
-  données. C'est rarement le cas.
+  sur vingt matchs de forme et un classement, soit mieux calibré qu'Unibet, qui dispose
+  de bien plus de données. C'est rarement le cas.
+- Un consensus Forebet + modèle reste deux estimations, pas une vérification : deux
+  sources peuvent se tromper ensemble, et l'accord entre elles ne rend pas un résultat
+  garanti. Quand rien ne passe les seuils, **ne pas jouer** est la conclusion prévue.
 - Le modèle ignore l'essentiel de ce qui décide un match : blessures, suspensions,
   turnover, météo, enjeu, motivation, arbitrage.
 - Les probabilités d'un ticket combiné supposent les matchs **indépendants**, ce qu'ils

@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from betbot import consensus
 from betbot.combo import (
     MAX_LEG_VALUE,
     MIN_LEG_ODDS,
@@ -82,8 +83,8 @@ def _model_note(bundle: MatchBundle) -> str:
     if poisson.source == SOURCE_FORM:
         return (
             f"_{goals} **Aucune cote pour caler le modele** : l'estimation ne repose que "
-            "sur cinq matchs de forme, sans tenir compte du niveau des adversaires "
-            "rencontres. A traiter comme un ordre de grandeur, pas comme une probabilite._"
+            "sur la forme recente, sans le contre-poids du marche. A traiter comme un "
+            "ordre de grandeur, pas comme une probabilite._"
         )
     gap = poisson.calibration_gap
     if poisson.source == SOURCE_FORM_ONLY:
@@ -91,8 +92,9 @@ def _model_note(bundle: MatchBundle) -> str:
             f" Ecart maximal avec le marche : {gap:.1f} pts." if gap is not None else ""
         )
         return (
-            f"_{goals} Estimation tiree des cinq derniers matchs de chaque equipe, sans "
-            f"reference aux cotes : elle est plus tranchee que le marche.{ecart} Au-dela "
+            f"_{goals} Estimation tiree des vingt derniers matchs de chaque equipe (les "
+            "recents plus lourds, domicile et exterieur distingues, niveau des adversaires "
+            f"retire, saison en ancrage), sans reference aux cotes.{ecart} Au-dela "
             "d'une dizaine de points, l'ecart mesure d'abord l'incertitude du modele, pas "
             "une occasion (`--poisson marche` pour l'estimation calee sur les cotes)._"
         )
@@ -180,9 +182,9 @@ def _markets_block(bundle: MatchBundle, *, top: int = 12) -> str:
 def _forebet_markets_block(bundle: MatchBundle) -> str:
     """Probabilites des pages Forebet specialisees, face au modele et a la cote.
 
-    Forebet est une source independante : un ecart marque avec le modele Poisson est
-    un signal de prudence, pas un arbitrage, aucune des deux estimations n'etant
-    verifiable a l'avance.
+    Les deux estimations brutes restent affichees a cote de leur consensus : masquer
+    l'ecart derriere une moyenne donnerait une assurance que ni l'une ni l'autre n'a.
+    Un desaccord marque est signale, et suffit a ecarter le marche des combines.
     """
     markets = bundle.forebet.markets if bundle.forebet else {}
     if not markets:
@@ -191,22 +193,31 @@ def _forebet_markets_block(bundle: MatchBundle) -> str:
     available = bundle.best_odds()
     model = bundle.poisson.markets if bundle.poisson else {}
     rows = [
-        "| Marche | Proba Forebet | Proba modele | Cote dispo |",
-        "| --- | --- | --- | --- |",
+        "| Marche | Proba Forebet | Proba modele | Consensus | Cote dispo |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for market, probability in sorted(markets.items(), key=lambda item: item[1], reverse=True):
         mine = model.get(market)
         offered = available.get(market)
+        agreed = consensus.blend(probability, mine)
+        if agreed is None:
+            blended = f"desaccord ({abs(probability - (mine or 0)):.0f} pts)"
+        elif agreed.agreed:
+            blended = f"{agreed.probability:.1f} %"
+        else:
+            blended = "-"
         rows.append(
             f"| {market} | {probability:.0f} % | "
-            f"{f'{mine:.1f} %' if mine is not None else '-'} | "
+            f"{f'{mine:.1f} %' if mine is not None else '-'} | {blended} | "
             f"{f'{offered:.2f}' if offered else '-'} |"
         )
     rows += [
         "",
-        "_Les marches de mi-temps n'ont pas d'equivalent dans le modele : la colonne "
-        "« proba modele » reste vide. Deux estimations proches ne valident rien, elles "
-        "peuvent se tromper ensemble._",
+        "_Le consensus pese Forebet a 60 % et le modele a 40 %, et n'existe que si les "
+        f"deux se rejoignent a moins de {consensus.MAX_DISAGREEMENT:.0f} points ; au-dela, "
+        "le marche est ecarte des combines. Les marches de mi-temps n'ont pas "
+        "d'equivalent dans le modele, d'ou les colonnes vides. Deux estimations proches "
+        "ne valident rien : elles peuvent se tromper ensemble._",
     ]
     return "\n".join(rows)
 
@@ -502,7 +513,11 @@ def write_report(
         json.dumps(
             {
                 "matchs": [
-                    {"data": bundle.to_dict(), "analysis": analysis.markdown if analysis else None}
+                    {
+                        "data": bundle.to_dict(),
+                        "consensus": consensus.summary(bundle),
+                        "analysis": analysis.markdown if analysis else None,
+                    }
                     for bundle, analysis in pairs
                 ],
                 "combines": [_ticket_to_dict(item) for item in tickets],

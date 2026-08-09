@@ -2,10 +2,10 @@
 
 Deux sources d'information existent pour estimer les buts attendus d'une rencontre :
 les cotes du bookmaker, qui agregent l'information de tout le marche, et la forme
-recente lue sur Flashscore, qui porte sur cinq matchs et ignore le niveau des
-adversaires. La seconde, utilisee seule, produit des estimations absurdes des qu'une
-equipe change de contexte (un club qui marque 2.6 buts par match dans son championnat
-n'est pas favori en coupe d'Europe).
+recente lue sur Flashscore. La seconde est mesuree par `betbot.strength` : vingt matchs
+ponderes par leur anciennete, domicile et exterieur separes, niveau des adversaires
+retire et ancrage sur le classement de la saison. Elle reste plus fragile que le marche,
+qui incorpore les compositions, les blessures et l'argent joue.
 
 Le modele part donc des cotes quand elles existent : on retire la marge, puis on
 cherche le couple de buts attendus dont la matrice des scores reproduit au mieux les
@@ -19,10 +19,9 @@ equipe ne marque pas.
 
 Les deux modeles restent disponibles, `MODEL_FORM` etant celui d'origine :
 
-- `MODEL_FORM` : buts attendus deduits de la seule forme recente, sans correction
-  Dixon-Coles ni reference au marche. Il produit des probabilites nettement plus
-  tranchees que les cotes, donc beaucoup de valeur apparente, dont une partie est de
-  l'erreur d'estimation ;
+- `MODEL_FORM` : buts attendus deduits de la seule forme recente, sans reference au
+  marche. Il produit des probabilites plus tranchees que les cotes, donc beaucoup de
+  valeur apparente, dont une partie est de l'erreur d'estimation ;
 - `MODEL_MARKET` : la meme matrice, mais calee sur les cotes dont la marge a ete
   retiree. Il reproduit le marche a environ deux points pres, et ne trouve donc que
   rarement un pari a esperance positive.
@@ -37,6 +36,7 @@ from collections.abc import Callable
 from math import exp, factorial
 
 from betbot.models import MatchStats, PoissonResult
+from betbot.strength import team_rates
 
 LEAGUE_AVG_GOALS = 1.35  # buts moyens par equipe et par match (championnats europeens)
 HOME_ADVANTAGE = 1.15
@@ -294,7 +294,7 @@ def market_gap(markets: dict[str, float], odds: dict[str, float] | None) -> floa
     return round(100 * gap, 2)
 
 
-def _shrink(average: float, sample_size: int, shrinkage: float = SHRINKAGE) -> float:
+def _shrink(average: float, sample_size: float, shrinkage: float = SHRINKAGE) -> float:
     """Rapproche une moyenne d'echantillon de la moyenne de championnat.
 
     Sur cinq matchs, une moyenne brute est tres bruitee et ignore le niveau des
@@ -328,20 +328,31 @@ def fit_from_form(
     shrinkage: float = SHRINKAGE,
     bounds: tuple[float, float] = (MIN_LAMBDA, MAX_LAMBDA),
 ) -> tuple[float, float] | None:
-    """Buts attendus deduits de la forme recente, faute de cotes."""
-    home, away = stats.home_form, stats.away_form
-    if not home or not away or not home.matches_played or not away.matches_played:
+    """Buts attendus deduits de la forme recente, faute de cotes.
+
+    Les buts marques et encaisses viennent de `betbot.strength` : matchs recents
+    ponderes, domicile et exterieur separes, niveau des adversaires retire et ancrage sur
+    le classement de la saison. Sans detail match par match, ce sont les moyennes brutes,
+    comme dans les premieres versions.
+    """
+    home = team_rates(
+        stats.home_form, at_home=True, table=stats.home_table, standings=stats.standings
+    )
+    away = team_rates(
+        stats.away_form, at_home=False, table=stats.away_table, standings=stats.standings
+    )
+    if not home or not away:
         return None
     return (
         _expected_goals(
-            _shrink(home.avg_goals_for, home.matches_played, shrinkage),
-            _shrink(away.avg_goals_against, away.matches_played, shrinkage),
+            _shrink(home.scored, home.sample, shrinkage),
+            _shrink(away.conceded, away.sample, shrinkage),
             home=True,
             bounds=bounds,
         ),
         _expected_goals(
-            _shrink(away.avg_goals_for, away.matches_played, shrinkage),
-            _shrink(home.avg_goals_against, home.matches_played, shrinkage),
+            _shrink(away.scored, away.sample, shrinkage),
+            _shrink(home.conceded, home.sample, shrinkage),
             home=False,
             bounds=bounds,
         ),
@@ -394,18 +405,19 @@ def compute(
 def _compute_from_form(
     stats: MatchStats, market_odds: dict[str, float] | None
 ) -> PoissonResult | None:
-    """Modele d'origine : deux Poisson independantes nourries par la forme recente.
+    """Modele de forme : la matrice des scores nourrie par la seule forme recente.
 
-    Les cotes ne servent qu'a mesurer l'ecart obtenu, jamais a corriger l'estimation :
-    c'est le comportement des premieres versions, celui qui produit des probabilites
-    tranchees et donc des combines a forte valeur affichee.
+    Les cotes ne servent qu'a mesurer l'ecart obtenu, jamais a corriger l'estimation.
+    La correction Dixon-Coles est appliquee comme sur le modele de marche : deux Poisson
+    independantes sous-estiment le 0-0 et le 1-1, les deux scores les plus frequents du
+    football, donc faussent les marches joues ici (les deux marquent, doubles chances).
     """
     form = fit_from_form(
         stats, shrinkage=FORM_SHRINKAGE, bounds=(FORM_MIN_LAMBDA, FORM_MAX_LAMBDA)
     )
     if not form:
         return None
-    result = _result(*form, SOURCE_FORM_ONLY, None, dixon_coles=False)
+    result = _result(*form, SOURCE_FORM_ONLY, None, dixon_coles=True)
     result.calibration_gap = market_gap(
         {market: value / 100 for market, value in result.markets.items()}, market_odds
     )

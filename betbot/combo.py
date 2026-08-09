@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from math import prod
 
+from betbot import consensus
 from betbot.models import MatchBundle
 from betbot.poisson import CALIBRATED_SOURCES
 from betbot.trap import trap_reasons
@@ -23,13 +24,14 @@ VALUE_TICKET_SIZES = (6, 8)
 BTTS_YES = "Les deux marquent : oui"
 BTTS_NO = "Les deux marquent : non"
 BTTS_MIX_LABEL = "Combine 4 selections (2 x les deux marquent oui, 2 x non)"
-# Marches ou Forebet publie sa propre probabilite : elle est preferee a celle du modele,
-# etant tiree d'un historique bien plus large que cinq matchs de forme.
+# Marches ou Forebet publie sa propre probabilite : elle y est reunie a celle du modele
+# (voir `betbot.consensus`), et la selection exige 60 % de ce consensus.
 FOREBET_MARKETS = (BTTS_YES, BTTS_NO, "1N", "N2", "12")
-# Seuil applique aux probabilites Forebet de ces marches.
+# Seuil applique au consensus sur ces marches.
 FOREBET_MIN_PROBABILITY = 60.0
-SOURCE_FOREBET = "Forebet"
-SOURCE_MODEL = "modele"
+SOURCE_FOREBET = consensus.SOURCE_FOREBET
+SOURCE_MODEL = consensus.SOURCE_MODEL
+SOURCE_CONSENSUS = consensus.SOURCE_CONSENSUS
 # Une selection a moins d'une chance sur deux n'a rien a faire dans un combine long :
 # huit selections a 50 % ne passent qu'une fois sur 256.
 MIN_LEG_PROBABILITY = 55.0
@@ -148,17 +150,23 @@ def _leg_for(
     """Selection d'un marche, ecartee si elle est trop peu probable ou piegeuse.
 
     Sur les marches que Forebet publie (les deux marquent oui/non, doubles chances), sa
-    probabilite remplace celle du modele et doit atteindre 60 % : elle repose sur un
-    historique bien plus large que cinq matchs de forme. Ailleurs le modele reste seul.
+    probabilite est reunie a celle du modele en une seule valeur, qui doit atteindre
+    60 % ; les deux sources doivent aussi se rejoindre, sans quoi rien n'est retenu.
+    Ailleurs le modele reste seul, au seuil habituel.
 
     Une selection designee comme piege par `betbot.trap` est refusee quelle que soit sa
-    probabilite : classement serre, defenses trop solides ou trop friables, ou
-    confrontations directes qui racontent l'inverse.
+    probabilite : classement serre, defenses trop solides ou trop friables, score
+    pronostique ferme, ou confrontations directes qui racontent l'inverse.
     """
-    forebet = bundle.forebet.markets.get(market) if bundle.forebet else None
-    if market in FOREBET_MARKETS and forebet is not None:
-        probability, source = forebet, SOURCE_FOREBET
-        floor = max(min_probability, FOREBET_MIN_PROBABILITY)
+    if market in FOREBET_MARKETS:
+        agreed = consensus.for_market(bundle, market)
+        if agreed is None:
+            return None
+        probability, source = agreed.probability, agreed.source
+        # Les 60 % demandes portent sur ce que dit Forebet : quand il ne publie pas le
+        # marche, le modele reste juge au seuil habituel.
+        forebet_spoke = source != SOURCE_MODEL
+        floor = max(min_probability, FOREBET_MIN_PROBABILITY) if forebet_spoke else min_probability
     else:
         model = bundle.poisson.markets.get(market) if bundle.poisson else None
         if model is None:

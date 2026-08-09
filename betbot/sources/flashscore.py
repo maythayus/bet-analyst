@@ -25,7 +25,7 @@ from typing import Any
 import requests
 
 from betbot.config import USER_AGENT, ScrapeConfig
-from betbot.models import MatchStats, TableStanding, TeamForm
+from betbot.models import MatchStats, PlayedMatch, TableStanding, TeamForm
 from betbot.sources.bookmakers import normalise, similarity
 
 log = logging.getLogger(__name__)
@@ -42,6 +42,12 @@ _STANDING_GOALS = re.compile(r"^(\d+)\s*:\s*(\d+)$")
 # Colonnes lues a gauche de celle des buts : joues, gagnes, nuls, perdus.
 _STANDING_COLUMNS = 4
 FOOTBALL_SPORT_ID = 1
+# Matchs lus sur la page de resultats, retenus pour la forme, et resultats affiches.
+# Vingt matchs valent mieux que cinq : ponderes par leur anciennete, ils mesurent une
+# force au lieu d'une serie. Au-dela, c'est une autre saison, avec un autre effectif.
+RESULTS_LIMIT = 25
+FORM_SAMPLE = 20
+DISPLAYED_RESULTS = 5
 # La recherche renvoie aussi des joueurs (type 2), dont le libelle ressemble a un club :
 # « Rousseau Thomas (Le Havre) » ne doit pas etre pris pour « Dunav Rousse ».
 TEAM_PARTICIPANT = 1
@@ -587,7 +593,9 @@ def fetch_standings(team: Team, cfg: ScrapeConfig) -> list[TableStanding]:
         return _parse_standings(page)
 
 
-def fetch_team_results(team: Team, cfg: ScrapeConfig, *, limit: int = 10) -> list[PastMatch]:
+def fetch_team_results(
+    team: Team, cfg: ScrapeConfig, *, limit: int = RESULTS_LIMIT
+) -> list[PastMatch]:
     """Ouvre la page 'resultats' d'une equipe et lit ses derniers matchs joues."""
     url = TEAM_URL.format(slug=team.slug, team_id=team.identifier)
     with _flashscore_page(cfg, url) as page:
@@ -618,18 +626,35 @@ def team_with_results(
     raise last or FlashscoreUnavailable("Aucun candidat exploitable sur Flashscore")
 
 
-def build_form(team_name: str, matches: list[PastMatch], *, sample: int = 5) -> TeamForm:
-    """Convertit une liste de matchs en forme recente (du point de vue de l'equipe)."""
+def build_form(
+    team_name: str,
+    matches: list[PastMatch],
+    *,
+    sample: int = FORM_SAMPLE,
+    shown: int = DISPLAYED_RESULTS,
+) -> TeamForm:
+    """Convertit une liste de matchs en forme recente (du point de vue de l'equipe).
+
+    Chaque match est conserve en detail — adversaire, lieu, buts — pour que le modele
+    puisse ponderer les plus recents et retirer le niveau des adversaires. Seuls les
+    `shown` derniers resultats sont affiches : une suite de vingt lettres ne se lit pas.
+    """
     form = TeamForm(name=team_name)
     needle = team_name.lower()
     for match in matches[:sample]:
         is_home = needle in match.home.lower()
-        scored = match.home_goals if is_home else match.away_goals
-        conceded = match.away_goals if is_home else match.home_goals
+        played = PlayedMatch(
+            opponent=match.away if is_home else match.home,
+            scored=match.home_goals if is_home else match.away_goals,
+            conceded=match.away_goals if is_home else match.home_goals,
+            at_home=is_home,
+            date=match.date,
+        )
+        form.matches.append(played)
         form.matches_played += 1
-        form.goals_for += scored
-        form.goals_against += conceded
-        form.last_results.append("W" if scored > conceded else "D" if scored == conceded else "L")
+        form.goals_for += played.scored
+        form.goals_against += played.conceded
+    form.last_results = [played.result for played in form.matches[:shown]]
     return form
 
 
@@ -693,5 +718,6 @@ def fetch_match_stats(
         head_to_head=head_to_head(home_matches, away_title),
         home_table=home_standing,
         away_table=away_standing,
+        standings=table,
         url=TEAM_URL.format(slug=home.slug, team_id=home.identifier),
     )

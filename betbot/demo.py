@@ -62,6 +62,13 @@ _FIXTURES: list[tuple[MatchStats, ForebetPrediction]] = [
             predicted_score="2-1",
             avg_goals=2.8,
             odds={"1": 1.85, "X": 3.60, "2": 4.20},
+            markets={
+                "Les deux marquent : oui": 58.0,
+                "Les deux marquent : non": 42.0,
+                "1N": 72.0,
+                "Plus de 2.5 buts": 55.0,
+                "Moins de 2.5 buts": 45.0,
+            },
         ),
     ),
     (
@@ -120,6 +127,15 @@ _FIXTURES: list[tuple[MatchStats, ForebetPrediction]] = [
             predicted_score="0-1",
             avg_goals=2.1,
             odds={"1": 4.00, "X": 3.30, "2": 1.95},
+            markets={
+                # Un desaccord volontaire sur « les deux marquent : oui », pour que le
+                # rapport de demonstration montre aussi ce cas-la.
+                "Les deux marquent : oui": 25.0,
+                "Les deux marquent : non": 75.0,
+                "N2": 78.0,
+                "Plus de 2.5 buts": 45.0,
+                "Moins de 2.5 buts": 55.0,
+            },
         ),
     ),
 ]
