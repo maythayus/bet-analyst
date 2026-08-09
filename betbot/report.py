@@ -191,33 +191,38 @@ def _forebet_markets_block(bundle: MatchBundle) -> str:
         return ""
 
     available = bundle.best_odds()
-    model = bundle.poisson.markets if bundle.poisson else {}
+    detail = consensus.summary(bundle)
     rows = [
-        "| Marche | Proba Forebet | Proba modele | Consensus | Cote dispo |",
-        "| --- | --- | --- | --- | --- |",
+        "| Marche | Proba Forebet | Proba modele | Cote implicite | Retenu | Confiance | Cote |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for market, probability in sorted(markets.items(), key=lambda item: item[1], reverse=True):
-        mine = model.get(market)
-        offered = available.get(market)
-        agreed = consensus.blend(probability, mine)
-        if agreed is None:
-            blended = f"desaccord ({abs(probability - (mine or 0)):.0f} pts)"
-        elif agreed.agreed:
-            blended = f"{agreed.probability:.1f} %"
+        line = detail.get(market, {})
+        mine, implied = line.get("modele"), line.get("cote_implicite")
+        kept, gap, confidence = line.get("retenu"), line.get("ecart"), line.get("confiance")
+        if kept is None:
+            retained = f"ecarte ({gap:.0f} pts d'ecart)" if isinstance(gap, float) else "-"
+        elif line.get("desaccord"):
+            retained = f"{kept:.1f} % (cote arbitre)"
         else:
-            blended = "-"
+            retained = f"{kept:.1f} %"
         rows.append(
             f"| {market} | {probability:.0f} % | "
-            f"{f'{mine:.1f} %' if mine is not None else '-'} | {blended} | "
-            f"{f'{offered:.2f}' if offered else '-'} |"
+            f"{f'{mine:.1f} %' if isinstance(mine, float) else '-'} | "
+            f"{f'{implied:.1f} %' if isinstance(implied, float) else '-'} | {retained} | "
+            f"{f'{confidence:.0%}' if isinstance(confidence, float) else '-'} | "
+            f"{f'{available[market]:.2f}' if available.get(market) else '-'} |"
         )
     rows += [
         "",
-        "_Le consensus pese Forebet a 60 % et le modele a 40 %, et n'existe que si les "
-        f"deux se rejoignent a moins de {consensus.MAX_DISAGREEMENT:.0f} points ; au-dela, "
-        "le marche est ecarte des combines. Les marches de mi-temps n'ont pas "
-        "d'equivalent dans le modele, d'ou les colonnes vides. Deux estimations proches "
-        "ne valident rien : elles peuvent se tromper ensemble._",
+        "_La valeur retenue pese Forebet a 60 % et le modele a 40 %, puis tire vers la plus "
+        "basse des deux a proportion de leur desaccord : la confiance affichee tombe a 0 a "
+        f"la limite de tolerance (environ {consensus.MAX_DISAGREEMENT:.0f} points d'ecart, "
+        "moins autour de 50 % ou l'ecart fait basculer la decision, plus aux extremes ou les "
+        "deux sources disent la meme chose). Au-dela, la cote arbitre : la source la plus "
+        "proche du marche l'emporte, sinon le marche est ecarte des combines. Les marches de "
+        "mi-temps n'ont pas d'equivalent dans le modele, d'ou les colonnes vides. Deux "
+        "estimations proches ne valident rien : elles peuvent se tromper ensemble._",
     ]
     return "\n".join(rows)
 

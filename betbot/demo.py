@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from betbot.models import ForebetPrediction, MatchStats, TableStanding, TeamForm
+from betbot.models import (
+    BookmakerLine,
+    ForebetPrediction,
+    MatchStats,
+    TableStanding,
+    TeamForm,
+)
 
 _FIXTURES: list[tuple[MatchStats, ForebetPrediction]] = [
     (
@@ -141,8 +147,44 @@ _FIXTURES: list[tuple[MatchStats, ForebetPrediction]] = [
 ]
 
 
+# Cotes fictives d'un bookmaker, marches detailles compris : sans elles, le desaccord
+# entre Forebet et le modele n'aurait aucun arbitre dans le rapport de demonstration.
+_ODDS: dict[str, dict[str, float]] = {
+    "Olympique Lyonnais vs Stade Rennais": {
+        "1": 1.85,
+        "X": 3.60,
+        "2": 4.20,
+        "Les deux marquent : oui": 1.72,
+        "Les deux marquent : non": 2.05,
+        "Plus de 2.5 buts": 1.80,
+        "Moins de 2.5 buts": 1.95,
+        "1N": 1.28,
+    },
+    "Getafe vs Athletic Bilbao": {
+        "1": 4.00,
+        "X": 3.30,
+        "2": 1.95,
+        # 2.05 / 1.80 : le marche voit « les deux marquent » autour de 47 %, tout pres du
+        # modele (48.7 %) et tres loin de Forebet (25 %). C'est lui qui tranche le
+        # desaccord, et la valeur retenue reste sous le seuil : rien n'est joue pour
+        # autant.
+        "Les deux marquent : oui": 2.05,
+        "Les deux marquent : non": 1.80,
+        "Plus de 2.5 buts": 2.20,
+        "Moins de 2.5 buts": 1.65,
+        "N2": 1.30,
+    },
+}
+
+
 def predictions() -> list[ForebetPrediction]:
     return [prediction for _, prediction in _FIXTURES]
+
+
+def bookmaker_lines(home_team: str, away_team: str) -> list[BookmakerLine]:
+    """Cotes fictives de la rencontre, vides si elle n'en a pas."""
+    odds = _ODDS.get(f"{home_team} vs {away_team}")
+    return [BookmakerLine(bookmaker="Unibet", odds=dict(odds))] if odds else []
 
 
 def stats_for(home_team: str, away_team: str) -> MatchStats | None:

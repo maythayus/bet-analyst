@@ -164,11 +164,10 @@ def build_bundles(
     bundles: list[MatchBundle] = []
     for prediction in predictions:
         stats = _collect_stats(prediction, cfg, use_flashscore=use_flashscore, offline=offline)
-        bundle = MatchBundle(
-            stats=stats,
-            forebet=prediction,
-            bookmakers=_lines_for(prediction, odds) if odds else [],
-        )
+        lines = _lines_for(prediction, odds) if odds else []
+        if offline and not lines:
+            lines = demo.bookmaker_lines(prediction.home_team, prediction.away_team)
+        bundle = MatchBundle(stats=stats, forebet=prediction, bookmakers=lines)
         # Les cotes servent de reference au modele : elles doivent donc etre attachees
         # a la rencontre avant le calcul.
         bundle.poisson = poisson.compute(

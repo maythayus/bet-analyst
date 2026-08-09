@@ -152,8 +152,10 @@ def _leg_for(
 
     Sur les marches que Forebet publie (les deux marquent oui/non, doubles chances), sa
     probabilite est reunie a celle du modele en une seule valeur, qui doit atteindre
-    `FOREBET_MIN_PROBABILITY` ; les deux sources doivent aussi se rejoindre, sans quoi
-    rien n'est retenu. Ailleurs le modele reste seul, au seuil habituel.
+    `FOREBET_MIN_PROBABILITY`. Les deux sources doivent aussi se rejoindre : quand elles
+    se contredisent, la cote du bookmaker departage celle qui s'en approche le plus, et a
+    defaut rien n'est retenu (voir `betbot.consensus`). Ailleurs le modele reste seul, au
+    seuil habituel.
 
     Une selection designee comme piege par `betbot.trap` est refusee quelle que soit sa
     probabilite : classement serre, defenses trop solides ou trop friables, score

@@ -7,15 +7,16 @@ import logging
 import os
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from betbot import poisson
+from betbot import poisson, tracking
 from betbot.combo import build_ticket
-from betbot.config import AppConfig
+from betbot.config import AppConfig, ScrapeConfig
 from betbot.pipeline import run
 from betbot.report import build_markdown, write_report
 from betbot.share import ShareError, publish_report, send_report
-from betbot.sources import forebet_pages
+from betbot.sources import flashscore, forebet_pages
 from betbot.sources.http import FetchError
 
 # Avec --today, la journee entiere est analysee : ce plafond n'existe que pour eviter
@@ -214,9 +215,51 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="telecharger le navigateur dont Flashscore a besoin, puis quitter",
     )
+    parser.add_argument(
+        "--bilan",
+        action="store_true",
+        help="confronter les pronostics deja enregistres aux scores reels, afficher ce que "
+        "vaut chaque source, puis quitter",
+    )
+    parser.add_argument(
+        "--no-suivi",
+        action="store_true",
+        help="ne pas enregistrer les pronostics du jour dans le fichier de suivi",
+    )
     parser.add_argument("--demo", action="store_true", help="donnees fictives, aucun acces reseau")
     parser.add_argument("--verbose", "-v", action="store_true", help="logs detailles")
     return parser.parse_args(argv)
+
+
+def review(output_dir: Path, cfg: ScrapeConfig) -> int:
+    """Confronte les pronostics enregistres aux scores reels et affiche le bilan.
+
+    Les scores viennent des pages de resultats Flashscore des equipes qui recevaient : une
+    rencontre introuvable (match reporte, equipe mal identifiee) reste simplement non
+    reglee, elle sera reprise au prochain bilan.
+    """
+    path = output_dir / tracking.HISTORY_FILE
+    predictions = tracking.load(path)
+    if not predictions:
+        print(
+            f"Aucun pronostic enregistre dans {path} : lance une analyse d'abord.",
+            file=sys.stderr,
+        )
+        return 1
+
+    def results_for(team_name: str) -> list[flashscore.PastMatch]:
+        try:
+            team = flashscore.find_team(team_name, cfg)
+            return flashscore.fetch_team_results(team, cfg) if team else []
+        except (FetchError, flashscore.FlashscoreUnavailable) as exc:
+            log.warning("Resultats indisponibles pour %s : %s", team_name, exc)
+            return []
+
+    updated, settled = tracking.settle_all(predictions, results_for)
+    if settled:
+        tracking.save(updated, path)
+    print(f"\n{tracking.markdown(updated)}")
+    return 0
 
 
 def open_report(path: Path) -> None:
@@ -331,6 +374,11 @@ def main(argv: list[str] | None = None) -> int:
         return install_chromium()
 
     cfg = AppConfig()
+    if args.output:
+        cfg.output_dir = args.output
+
+    if args.bilan:
+        return review(cfg.output_dir, cfg.scrape)
 
     if args.save_forebet or args.save_forebet_only:
         saved = save_forebet_pages(cfg, headless=args.save_forebet_headless)
@@ -353,8 +401,6 @@ def main(argv: list[str] | None = None) -> int:
         cfg.lmstudio.base_url = args.base_url
     if args.temperature is not None:
         cfg.lmstudio.temperature = args.temperature
-    if args.output:
-        cfg.output_dir = args.output
 
     try:
         pairs = run(
@@ -390,10 +436,11 @@ def main(argv: list[str] | None = None) -> int:
         print("Aucun match analyse.", file=sys.stderr)
         return 1
 
+    bundles = [bundle for bundle, _ in pairs]
     ticket = None
     if args.combo or args.min_combo_prob:
         ticket = build_ticket(
-            [bundle for bundle, _ in pairs],
+            bundles,
             legs=args.combo or 4,
             market=args.combo_market,
             min_probability=args.min_combo_prob,
@@ -413,6 +460,11 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     markdown_path, json_path = write_report(pairs, cfg.output_dir, ticket)
+    if not args.no_suivi:
+        history = tracking.record(
+            bundles, cfg.output_dir, day=datetime.now().strftime("%Y-%m-%d")
+        )
+        print(f"Suivi    : {history} (`--bilan` apres les matchs pour le confronter aux scores)")
     if args.print_report:
         print()
         print(build_markdown(pairs, ticket))

@@ -14,7 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from betbot import consensus, demo, poisson, strength, trap
+from betbot import consensus, demo, poisson, strength, tracking, trap
 from betbot.cli import discover_market_pages, open_report
 from betbot.combo import (
     BTTS_NO,
@@ -990,14 +990,23 @@ class TestForebetSourcedLegs(unittest.TestCase):
         )
 
     def test_the_two_sources_are_averaged_when_they_agree(self) -> None:
-        """Forebet pese 60 %, le modele 40 % : c'est la valeur retenue, pas l'une des deux."""
+        """Forebet pese 60 %, le modele 40 %, et le reste d'ecart tire vers le bas."""
         leg = _leg_for(self._bundle(model=72.0, forebet=66.0), BTTS_YES, 1.60, 55.0)
         assert leg is not None
-        self.assertEqual((leg.probability, leg.source), (68.4, SOURCE_CONSENSUS))
+        self.assertEqual(leg.source, SOURCE_CONSENSUS)
+        self.assertGreater(leg.probability, 66.0)
+        self.assertLess(leg.probability, 68.4)
 
-    def test_a_disagreement_leaves_the_market_alone(self) -> None:
-        """Vingt points d'ecart : l'un des deux se trompe lourdement, on ne joue pas."""
-        self.assertIsNone(_leg_for(self._bundle(model=90.0, forebet=64.0), BTTS_YES, 1.60, 55.0))
+    def test_the_odds_settle_a_disagreement_in_favour_of_forebet(self) -> None:
+        """La cote de 1.60 (57.9 % marge retiree) donne raison a Forebet, pas au modele."""
+        leg = _leg_for(self._bundle(model=90.0, forebet=64.0), BTTS_YES, 1.60, 55.0)
+        assert leg is not None
+        self.assertEqual(leg.probability, 64.0)
+        self.assertTrue(leg.source.endswith(consensus.ARBITRATED))
+
+    def test_a_disagreement_the_odds_cannot_settle_leaves_the_market_alone(self) -> None:
+        """Les deux sources aussi loin du marche l'une que l'autre : on ne joue pas."""
+        self.assertIsNone(_leg_for(self._bundle(model=90.0, forebet=26.0), BTTS_YES, 1.60, 55.0))
 
     def test_below_the_floor_the_selection_is_rejected(self) -> None:
         """Un consensus sous le seuil ne suffit pas, meme si les deux sources se rejoignent."""
@@ -1098,21 +1107,45 @@ class TestTeamStrength(unittest.TestCase):
 class TestConsensus(unittest.TestCase):
     """Forebet et le modele reunis en une valeur, ou ecartes quand ils se contredisent."""
 
-    def test_the_average_is_weighted_towards_forebet(self) -> None:
-        agreed = consensus.blend(70.0, 60.0)
+    def test_two_sources_that_agree_give_the_weighted_average(self) -> None:
+        agreed = consensus.blend(70.0, 70.0)
         assert agreed is not None
-        self.assertEqual((agreed.probability, agreed.source), (66.0, consensus.SOURCE_CONSENSUS))
-        self.assertEqual(agreed.gap, 10.0)
+        self.assertEqual((agreed.probability, agreed.source), (70.0, consensus.SOURCE_CONSENSUS))
+        self.assertEqual((agreed.gap, agreed.confidence), (0.0, 1.0))
 
-    def test_the_consensus_never_exceeds_the_higher_source(self) -> None:
+    def test_the_value_never_leaves_the_interval_of_the_two_sources(self) -> None:
         """Reunir deux avis ne cree pas de certitude : la valeur reste entre les deux."""
         agreed = consensus.blend(72.0, 61.0)
         assert agreed is not None
         self.assertLessEqual(agreed.probability, 72.0)
         self.assertGreaterEqual(agreed.probability, 61.0)
 
-    def test_a_wide_gap_yields_nothing(self) -> None:
-        self.assertIsNone(consensus.blend(80.0, 50.0))
+    def test_the_confidence_falls_as_the_gap_widens(self) -> None:
+        """Plus les deux sources s'ecartent, plus la valeur tire vers la plus basse."""
+        close = consensus.blend(70.0, 66.0)
+        wide = consensus.blend(70.0, 58.0)
+        assert close is not None and wide is not None
+        self.assertGreater(close.confidence or 0, wide.confidence or 0)
+        # A ecart egal a la tolerance, il ne resterait que la valeur prudente.
+        self.assertLess(wide.probability - 58.0, 0.6 * (70.0 - 58.0))
+
+    def test_a_gap_near_fifty_percent_is_judged_more_harshly(self) -> None:
+        """Le meme ecart de 16 points : decisif autour de 50 %, benin vers les extremes."""
+        self.assertIsNone(consensus.blend(58.0, 42.0))
+        self.assertIsNotNone(consensus.blend(92.0, 76.0))
+
+    def test_the_odds_settle_a_disagreement(self) -> None:
+        """Le bookmaker est le mieux informe : la source qui s'en approche l'emporte."""
+        arbitrated = consensus.blend(80.0, 50.0, implied=78.0)
+        assert arbitrated is not None
+        self.assertEqual(arbitrated.probability, 80.0)
+        self.assertTrue(arbitrated.arbitrated)
+        self.assertFalse(arbitrated.agreed)
+        self.assertEqual(arbitrated.confidence, 0.0)
+
+    def test_the_odds_between_the_two_settle_nothing(self) -> None:
+        """A egale distance des deux, la cote ne designe personne : rien n'est retenu."""
+        self.assertIsNone(consensus.blend(80.0, 50.0, implied=65.0))
 
     def test_a_single_source_is_kept_as_is(self) -> None:
         only_forebet = consensus.blend(64.0, None)
@@ -1122,6 +1155,138 @@ class TestConsensus(unittest.TestCase):
         self.assertEqual(only_model.source, consensus.SOURCE_MODEL)
         self.assertFalse(only_forebet.agreed)
         self.assertIsNone(consensus.blend(None, None))
+
+    def test_the_implied_probability_drops_the_bookmaker_margin(self) -> None:
+        """Deux cotes d'issues complementaires suffisent a retirer la marge."""
+        bundle = MatchBundle(
+            stats=MatchStats(home_team="Equipe", away_team="Visiteur"),
+            bookmakers=[
+                BookmakerLine(
+                    bookmaker="Unibet",
+                    odds={BTTS_YES: 1.60, BTTS_NO: 2.20},
+                )
+            ],
+        )
+        implied = consensus.implied_for_market(bundle, BTTS_YES)
+        assert implied is not None
+        # 1/1.60 = 62.5 % cote en main, ramene a 57.9 % une fois la marge repartie.
+        self.assertLess(implied, 100 / 1.60)
+        self.assertAlmostEqual(implied, 57.89, places=1)
+
+    def test_an_uncovered_market_has_no_implied_probability(self) -> None:
+        bundle = MatchBundle(stats=MatchStats(home_team="Equipe", away_team="Visiteur"))
+        self.assertIsNone(consensus.implied_for_market(bundle, BTTS_YES))
+
+
+class TestTracking(unittest.TestCase):
+    """Suivi des pronostics : enregistrement, resultat reel, et ce que valent les sources."""
+
+    def _prediction(self, **changes: object) -> tracking.Prediction:
+        base = {
+            "date": "2026-07-25",
+            "match": "Equipe vs Visiteur",
+            "home_team": "Equipe",
+            "away_team": "Visiteur",
+            "market": BTTS_YES,
+            "forebet": 70.0,
+            "model": 60.0,
+            "implied": 62.0,
+            "kept": 66.0,
+            "source": consensus.SOURCE_CONSENSUS,
+            "odds": 1.60,
+        }
+        return tracking.Prediction(**{**base, **changes})
+
+    def _bundle(self) -> MatchBundle:
+        return MatchBundle(
+            stats=MatchStats(home_team="Equipe", away_team="Visiteur", kickoff="2026-07-25 18:00"),
+            forebet=ForebetPrediction(
+                home_team="Equipe",
+                away_team="Visiteur",
+                markets={BTTS_YES: 66.0, BTTS_NO: 34.0},
+            ),
+            poisson=PoissonResult(
+                prob_home=40.0,
+                prob_draw=30.0,
+                prob_away=30.0,
+                prob_over_25=50.0,
+                prob_btts=62.0,
+                expected_home_goals=1.4,
+                expected_away_goals=1.1,
+                most_likely_score="1-1",
+                markets={BTTS_YES: 62.0, BTTS_NO: 38.0},
+            ),
+            bookmakers=[BookmakerLine(bookmaker="Unibet", odds={BTTS_YES: 1.60, BTTS_NO: 2.20})],
+        )
+
+    def test_a_market_is_judged_on_the_real_score(self) -> None:
+        self.assertTrue(tracking.outcome(BTTS_YES, 2, 1))
+        self.assertFalse(tracking.outcome(BTTS_YES, 2, 0))
+        self.assertTrue(tracking.outcome(BTTS_NO, 2, 0))
+        self.assertTrue(tracking.outcome("1N", 1, 1))
+        self.assertFalse(tracking.outcome("N2", 2, 1))
+        self.assertTrue(tracking.outcome("12", 2, 1))
+        self.assertTrue(tracking.outcome("Plus de 2.5 buts", 2, 1))
+        self.assertFalse(tracking.outcome("Plus de 2.5 buts", 1, 1))
+        self.assertTrue(tracking.outcome("Moins de 2.5 buts", 1, 1))
+
+    def test_an_unjudgeable_market_stays_open(self) -> None:
+        """Le score final ne dit rien de la mi-temps : le pronostic reste non regle."""
+        self.assertIsNone(tracking.outcome("Les deux marquent : oui (1re mi-temps)", 2, 1))
+        untouched = tracking.settle(
+            self._prediction(market="Les deux marquent : oui (1re mi-temps)"), 2, 1
+        )
+        self.assertFalse(untouched.settled)
+
+    def test_settling_records_the_score(self) -> None:
+        judged = tracking.settle(self._prediction(), 1, 1)
+        self.assertEqual((judged.won, judged.score), (True, "1-1"))
+
+    def test_results_are_matched_by_team_names(self) -> None:
+        played = flashscore.PastMatch(
+            date="25.07.2026", home="Equipe", away="Visiteur", home_goals=0, away_goals=0
+        )
+        updated, settled = tracking.settle_all([self._prediction()], lambda _team: [played])
+        self.assertEqual(settled, 1)
+        self.assertEqual((updated[0].won, updated[0].score), (False, "0-0"))
+
+    def test_an_unfound_match_is_left_for_the_next_review(self) -> None:
+        updated, settled = tracking.settle_all([self._prediction()], lambda _team: [])
+        self.assertEqual(settled, 0)
+        self.assertFalse(updated[0].settled)
+
+    def test_each_source_is_measured_apart(self) -> None:
+        """Forebet annonce 70 %, le modele 60 % : seul le resultat reel les separe."""
+        settled = [
+            tracking.settle(self._prediction(), 1, 1),
+            tracking.settle(self._prediction(), 2, 0),
+        ]
+        by_source = {item.source: item for item in tracking.calibrations(settled)}
+        self.assertEqual(by_source["Forebet"].announced, 70.0)
+        self.assertEqual(by_source["Forebet"].realised, 50.0)
+        self.assertEqual(by_source["Forebet"].bias, 20.0)
+        self.assertLess(by_source["modele"].brier, by_source["Forebet"].brier)
+        self.assertFalse(by_source["Forebet"].meaningful)
+
+    def test_the_file_survives_a_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)
+            bundles = [self._bundle()]
+            path = tracking.record(bundles, output, day="2026-07-25")
+            first = tracking.load(path)
+            self.assertTrue(first)
+            tracking.record(bundles, output, day="2026-07-26")
+            self.assertEqual(len(tracking.load(path)), 2 * len(first))
+            tracking.save([tracking.settle(first[0], 1, 1)], path)
+            self.assertTrue(tracking.load(path)[0].settled)
+
+    def test_the_review_warns_on_a_thin_sample(self) -> None:
+        text = tracking.markdown([tracking.settle(self._prediction(), 1, 1)])
+        self.assertIn("| Forebet |", text)
+        self.assertIn(f"Moins de {tracking.MEANINGFUL_SAMPLE}", text)
+
+    def test_nothing_settled_says_so(self) -> None:
+        self.assertIn("Aucun pronostic regle", tracking.markdown([self._prediction()]))
 
 
 class TestTraps(unittest.TestCase):

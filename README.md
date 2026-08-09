@@ -120,17 +120,60 @@ seule probabilité** (`betbot/consensus.py`) : Forebet pèse 60 %, le modèle 40
 sources indépendantes qui se rejoignent valent mieux que chacune isolément, et le seuil
 de sélection est de **55 %** sur ce consensus — le même que partout ailleurs.
 
-À une condition, qui est tout l'intérêt du dispositif : **au-delà de 20 points d'écart,
-aucun consensus n'est calculé et le marché est écarté des combinés**. Une moyenne serait
-alors le pire des choix — une fausse tranquillité à mi-chemin de deux avis dont l'un se
-trompe lourdement. Le rapport affiche côte à côte la probabilité Forebet, celle du
-modèle, leur consensus ou la mention `desaccord (N pts)`, et le JSON reprend le détail
-(`consensus` par marché : `forebet`, `modele`, `consensus`, `ecart`, `source`,
-`desaccord`). Les valeurs brutes ne sont jamais remplacées par le consensus : masquer
-l'écart donnerait une assurance que ni l'une ni l'autre des sources n'a.
+À une condition, qui est tout l'intérêt du dispositif : les deux doivent se rejoindre.
+Le désaccord est traité en trois temps, du plus informé au plus prudent.
+
+**1. La tolérance dépend de l'endroit où tombe l'écart.** Dix points entre 45 % et 55 %
+font basculer la décision — l'un dit non, l'autre dit oui ; les mêmes dix points entre
+80 % et 90 % disent la même chose. La tolérance vaut donc environ **14 points autour de
+50 %** et jusqu'à **28 points aux extrêmes**, au lieu d'un seuil unique de 20 points
+appliqué partout.
+
+**2. La confiance se dégrade au lieu de casser net.** Dans la tolérance, la moyenne
+pondérée est tirée vers la **plus basse** des deux estimations, à proportion de l'écart :
+à écart nul elle est intacte, à la limite il ne reste que la valeur prudente. Le rapport
+affiche cette confiance en pourcentage. Plus aucun effet de seuil où 19 points passent et
+21 points sautent.
+
+**3. Au-delà, la cote arbitre.** Le bookmaker est l'acteur le mieux informé des trois :
+la source la plus proche de la **probabilité implicite de sa cote** (marge retirée grâce
+à l'issue complémentaire) l'emporte, à condition d'en être plus proche de 5 points au
+moins. Sa probabilité brute est retenue telle quelle, avec une confiance nulle et la
+mention `cote arbitre`. Si la cote se situe entre les deux, elle ne désigne personne et
+**le marché est écarté des combinés**, comme avant.
+
+Le rapport affiche côte à côte la probabilité Forebet, celle du modèle, la probabilité
+implicite de la cote, la valeur retenue et la confiance ; le JSON reprend le détail
+(`consensus` par marché : `forebet`, `modele`, `cote_implicite`, `retenu`, `ecart`,
+`tolerance`, `source`, `confiance`, `desaccord`). Les valeurs brutes ne sont jamais
+remplacées : masquer l'écart donnerait une assurance que ni l'une ni l'autre des sources
+n'a.
 
 Quand Forebet ne publie pas un marché (mi-temps, seuils de buts, scores), le modèle
 décide seul, au même seuil de 55 %.
+
+### Suivi des résultats : mesurer qui a raison
+
+Les 60/40 et les tolérances ci-dessus sont des **suppositions**, et rien ne permettait de
+les vérifier. Chaque analyse enregistre désormais ses pronostics dans `out/suivi.jsonl`
+(un par ligne : les trois estimations, la valeur retenue, la cote, l'heure du match), et
+`--bilan` les confronte aux scores réels lus sur Flashscore :
+
+```powershell
+python -m betbot --bilan
+```
+
+Le bilan mesure séparément Forebet, le modèle, la valeur retenue et la cote : la
+probabilité moyenne **annoncée** face à la part réellement **réalisée** (positif = la
+source se surestime), et le **score de Brier**, qui récompense à la fois la justesse et la
+franchise — annoncer 50 % partout ne rapporte rien. Un match introuvable ou reporté reste
+simplement non réglé, il sera repris au bilan suivant ; les marchés de mi-temps ne sont
+pas jugés, le score final ne suffit pas à les trancher.
+
+En dessous de **100 pronostics réglés**, ces écarts ne se distinguent pas du hasard et le
+bilan le dit explicitement : c'est une mesure, pas encore une conclusion, et les poids du
+consensus ne changeront qu'une fois l'échantillon suffisant. `--no-suivi` désactive
+l'enregistrement.
 
 ### Ce que vaut le seuil choisi
 
