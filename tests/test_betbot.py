@@ -833,9 +833,11 @@ class TestCombo(unittest.TestCase):
         assert ticket is not None
         self.assertTrue(all(leg.market == "Plus de 1.5 buts" for leg in ticket.legs))
 
-    def test_a_market_nobody_agrees_on_yields_no_ticket(self) -> None:
-        """Forebet et le modele se contredisent sur le BTTS de la demo : rien n'est bati."""
-        self.assertIsNone(build_ticket(self.bundles, legs=2, market=BTTS_YES))
+    def test_a_disagreed_match_stays_out_of_the_ticket(self) -> None:
+        """Forebet et le modele se contredisent sur le BTTS de Getafe : il n'est pas joue."""
+        ticket = build_ticket(self.bundles, legs=2, market=BTTS_YES)
+        matches = [leg.match for leg in ticket.legs] if ticket else []
+        self.assertNotIn("Getafe vs Athletic Bilbao", matches)
 
     def test_legs_are_ordered_by_kickoff(self) -> None:
         ticket = build_ticket(self.bundles, legs=2)
@@ -957,7 +959,7 @@ class TestBttsMixTicket(unittest.TestCase):
 
 
 class TestForebetSourcedLegs(unittest.TestCase):
-    """Sur les marches que Forebet publie, les deux sources sont reunies, des 60 %."""
+    """Sur les marches que Forebet publie, les deux sources sont reunies au seuil commun."""
 
     def _bundle(self, *, model: float, forebet: float | None) -> MatchBundle:
         stats = MatchStats(home_team="Equipe", away_team="Visiteur", kickoff="2026-07-26 18:00")
@@ -997,12 +999,16 @@ class TestForebetSourcedLegs(unittest.TestCase):
         """Vingt points d'ecart : l'un des deux se trompe lourdement, on ne joue pas."""
         self.assertIsNone(_leg_for(self._bundle(model=90.0, forebet=64.0), BTTS_YES, 1.60, 55.0))
 
-    def test_below_sixty_percent_the_selection_is_rejected(self) -> None:
-        """Un consensus a 59 % ne suffit pas, meme si les deux sources se rejoignent."""
-        self.assertIsNone(_leg_for(self._bundle(model=58.0, forebet=59.0), BTTS_YES, 1.60, 55.0))
+    def test_below_the_floor_the_selection_is_rejected(self) -> None:
+        """Un consensus sous le seuil ne suffit pas, meme si les deux sources se rejoignent."""
+        self.assertIsNone(_leg_for(self._bundle(model=52.0, forebet=53.0), BTTS_YES, 1.60, 55.0))
+
+    def test_the_forebet_floor_applies_even_with_a_lower_request(self) -> None:
+        """Un appelant plus permissif que le seuil Forebet ne l'emporte pas sur lui."""
+        self.assertIsNone(_leg_for(self._bundle(model=52.0, forebet=53.0), BTTS_YES, 1.60, 45.0))
 
     def test_the_model_still_answers_where_forebet_says_nothing(self) -> None:
-        """Sans Forebet, le modele decide seul, au seuil habituel et non a 60 %."""
+        """Sans Forebet, le modele decide seul, au seuil demande par l'appelant."""
         leg = _leg_for(self._bundle(model=57.0, forebet=None), BTTS_YES, 1.60, 55.0)
         assert leg is not None
         self.assertEqual((leg.probability, leg.source), (57.0, SOURCE_MODEL))

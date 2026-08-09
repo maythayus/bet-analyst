@@ -25,15 +25,16 @@ BTTS_YES = "Les deux marquent : oui"
 BTTS_NO = "Les deux marquent : non"
 BTTS_MIX_LABEL = "Combine 4 selections (2 x les deux marquent oui, 2 x non)"
 # Marches ou Forebet publie sa propre probabilite : elle y est reunie a celle du modele
-# (voir `betbot.consensus`), et la selection exige 60 % de ce consensus.
+# (voir `betbot.consensus`), et la selection exige `FOREBET_MIN_PROBABILITY` du consensus.
 FOREBET_MARKETS = (BTTS_YES, BTTS_NO, "1N", "N2", "12")
 # Seuil applique au consensus sur ces marches.
-FOREBET_MIN_PROBABILITY = 60.0
+FOREBET_MIN_PROBABILITY = 55.0
 SOURCE_FOREBET = consensus.SOURCE_FOREBET
 SOURCE_MODEL = consensus.SOURCE_MODEL
 SOURCE_CONSENSUS = consensus.SOURCE_CONSENSUS
-# Une selection a moins d'une chance sur deux n'a rien a faire dans un combine long :
-# huit selections a 50 % ne passent qu'une fois sur 256.
+# Seuil des marches ou le modele decide seul. Une selection a peine au-dessus d'une
+# chance sur deux ne vaut pas grand-chose dans un combine long : huit selections a 55 %
+# ne passent qu'une fois sur 119.
 MIN_LEG_PROBABILITY = 55.0
 # Au-dela de cet ecart avec le marche, l'explication la plus probable n'est pas une
 # aubaine mais une erreur du modele (equipe mal identifiee, statistiques manquantes) :
@@ -151,8 +152,8 @@ def _leg_for(
 
     Sur les marches que Forebet publie (les deux marquent oui/non, doubles chances), sa
     probabilite est reunie a celle du modele en une seule valeur, qui doit atteindre
-    60 % ; les deux sources doivent aussi se rejoindre, sans quoi rien n'est retenu.
-    Ailleurs le modele reste seul, au seuil habituel.
+    `FOREBET_MIN_PROBABILITY` ; les deux sources doivent aussi se rejoindre, sans quoi
+    rien n'est retenu. Ailleurs le modele reste seul, au seuil habituel.
 
     Une selection designee comme piege par `betbot.trap` est refusee quelle que soit sa
     probabilite : classement serre, defenses trop solides ou trop friables, score
@@ -163,7 +164,7 @@ def _leg_for(
         if agreed is None:
             return None
         probability, source = agreed.probability, agreed.source
-        # Les 60 % demandes portent sur ce que dit Forebet : quand il ne publie pas le
+        # Le seuil Forebet porte sur ce qu'il dit lui-meme : quand il ne publie pas le
         # marche, le modele reste juge au seuil habituel.
         forebet_spoke = source != SOURCE_MODEL
         floor = max(min_probability, FOREBET_MIN_PROBABILITY) if forebet_spoke else min_probability

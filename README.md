@@ -112,13 +112,13 @@ reviendrait à choisir celles où il se trompe le plus. Dans les deux cas, une s
 sélection par match, aucune cote en dessous de 1.20, et la mise conseillée est un quart
 du critère de Kelly plafonné à 5 % du capital.
 
-### Forebet et le modèle réunis, à partir de 60 %
+### Forebet et le modèle réunis, à partir de 55 %
 
 Sur les cinq marchés que Forebet publie lui-même — « les deux marquent » oui et non, et
 les trois doubles chances `1N`, `N2`, `12` — les deux estimations sont **réunies en une
 seule probabilité** (`betbot/consensus.py`) : Forebet pèse 60 %, le modèle 40 %. Deux
 sources indépendantes qui se rejoignent valent mieux que chacune isolément, et le seuil
-de sélection est de **60 %** sur ce consensus.
+de sélection est de **55 %** sur ce consensus — le même que partout ailleurs.
 
 À une condition, qui est tout l'intérêt du dispositif : **au-delà de 20 points d'écart,
 aucun consensus n'est calculé et le marché est écarté des combinés**. Une moyenne serait
@@ -130,7 +130,27 @@ modèle, leur consensus ou la mention `desaccord (N pts)`, et le JSON reprend le
 l'écart donnerait une assurance que ni l'une ni l'autre des sources n'a.
 
 Quand Forebet ne publie pas un marché (mi-temps, seuils de buts, scores), le modèle
-décide seul, au seuil habituel de 55 %.
+décide seul, au même seuil de 55 %.
+
+### Ce que vaut le seuil choisi
+
+Les seuils se multiplient : plus il est bas, plus il y a de matchs retenus, et moins le
+combiné a de chances de passer.
+
+| Seuil par sélection | Combi 4 | Combi 6 | Combi 8 |
+| --- | --- | --- | --- |
+| 55 % (actuel) | 9,2 % (1 fois sur 11) | 2,8 % (1 sur 36) | 0,8 % (1 sur 119) |
+| 60 % | 13 % (1 sur 8) | 4,7 % (1 sur 21) | 1,7 % (1 sur 60) |
+| 65 % | 18 % (1 sur 6) | 7,5 % (1 sur 13) | 3,2 % (1 sur 31) |
+| 70 % | 24 % (1 sur 4) | 12 % (1 sur 8) | 5,8 % (1 sur 17) |
+
+Un seuil élevé ne rend pas pour autant un ticket gagnant : il le rend plus probable et
+moins payant. Ce qui décide sur la durée est l'écart entre la probabilité et la cote,
+pas la probabilité seule — un 75 % coté 1.25 est un mauvais pari, un 60 % coté 2.00 en
+est un bon, à condition que le modèle ait raison. Et un seuil bas expose à l'erreur du
+modèle : sa marge étant de plusieurs points, une sélection annoncée à 55 % peut être
+réellement à 50 %. Les seuils vivent dans `betbot/combo.py`
+(`MIN_LEG_PROBABILITY`, `FOREBET_MIN_PROBABILITY`).
 
 ### Matchs pièges
 
