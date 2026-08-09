@@ -4,6 +4,7 @@ out/
 .env
 # Pages Forebet enregistrees a la main : personnelles et valables un seul jour.
 Forebet.htm
+Pronostics*.htm
 Predictions*.htm
 __pycache__/
 *.pyc

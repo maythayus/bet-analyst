@@ -67,9 +67,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         default=None,
         metavar="FICHIER",
-        help="page Forebet d'un marche (both to score, under/over 2.5, double chance, "
-        "mi-temps) sauvegardee a la main ; repetable. Par defaut, les fichiers "
-        "Predictions*.htm du dossier courant sont pris automatiquement",
+        help="page Forebet d'un marche (chaque equipe marque, moins/plus 2.5 de buts, "
+        "chance double, mi-temps) sauvegardee a la main ; repetable. Par defaut, les "
+        "fichiers Pronostics*.htm et Predictions*.htm du dossier courant sont pris "
+        "automatiquement",
     )
     parser.add_argument(
         "--no-bookmakers", action="store_true", help="ne pas recuperer les cotes Unibet"
@@ -343,16 +344,18 @@ def discover_market_pages() -> list[Path]:
     """Pages Forebet par marche posees a cote de l'executable ou dans le dossier courant.
 
     Evite d'avoir a taper quatre chemins : les fichiers enregistres par le navigateur
-    s'appellent « Predictions Both to score _ Today Forebet Football.htm » et derives.
+    s'appellent « Pronostics Chaque equipe marque _ Forebet Football.htm » et derives.
+    Les anciens noms anglais « Predictions... » restent ramasses.
     """
     found: list[Path] = []
     seen: set[Path] = set()
     for folder in (Path.cwd(), Path(sys.argv[0]).resolve().parent):
-        for path in sorted(folder.glob("Predictions*.htm*")):
-            resolved = path.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                found.append(path)
+        for pattern in ("Pronostics*.htm*", "Predictions*.htm*"):
+            for path in sorted(folder.glob(pattern)):
+                resolved = path.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    found.append(path)
     for path in found:
         print(f"Page Forebet trouvee : {path.name}")
     return found

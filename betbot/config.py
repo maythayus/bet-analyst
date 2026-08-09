@@ -65,7 +65,9 @@ class LMStudioConfig:
 class ScrapeConfig:
     """Parametres de collecte."""
 
-    forebet_url: str = os.getenv("FOREBET_URL", "https://www.forebet.com/en/football-tips-and-predictions-for-today")
+    forebet_url: str = os.getenv(
+        "FOREBET_URL", "https://www.forebet.com/fr/pronostics-pour-aujourd-hui"
+    )
     request_timeout: float = 30.0
     delay_between_requests: float = 2.0  # politesse envers les serveurs
     flashscore_headless: bool = os.getenv("FLASHSCORE_HEADLESS", "1") != "0"

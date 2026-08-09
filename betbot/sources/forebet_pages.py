@@ -21,22 +21,21 @@ from betbot.config import USER_AGENT, ScrapeConfig
 
 log = logging.getLogger(__name__)
 
-BASE_URL = "https://www.forebet.com/en/football-tips-and-predictions-for-today"
+BASE_URL = "https://www.forebet.com/fr/pronostics-pour-aujourd-hui"
 
-# Nom de fichier -> page. Les noms commencent par « Predictions » : ce sont ceux que
-# l'analyse ramasse ensuite toute seule dans le dossier.
+# Nom de fichier -> page. Les noms commencent par « Pronostics » : ce sont ceux que
+# l'analyse ramasse ensuite toute seule dans le dossier, au meme titre que les anciens
+# fichiers anglais « Predictions... » deja enregistres.
 FOREBET_PAGES: dict[str, str] = {
-    "Predictions 1X2 _ Today Forebet Football.htm": f"{BASE_URL}/predictions-1x2",
-    "Predictions Both to score _ Today Forebet Football.htm": (
-        f"{BASE_URL}/predictions-both-to-score"
+    "Pronostics 1X2 _ Forebet Football.htm": BASE_URL,
+    "Pronostics Chaque equipe marque _ Forebet Football.htm": (
+        f"{BASE_URL}/chaque-equipe-marque"
     ),
-    "Predictions Under_Over 2.5 goals _ Today Forebet Football.htm": (
-        f"{BASE_URL}/predictions-under-over-goals"
+    "Pronostics Moins-Plus 2.5 de buts _ Forebet Football.htm": (
+        f"{BASE_URL}/moins-plus-2-5-de-buts"
     ),
-    "Predictions Double chance _ Today Forebet Football.htm": (
-        f"{BASE_URL}/double-chance-predictions"
-    ),
-    "Predictions Half Time (HT) _ Today Forebet Football.htm": f"{BASE_URL}/predictions-ht",
+    "Pronostics Chance double _ Forebet Football.htm": f"{BASE_URL}/chance-double",
+    "Pronostics Mi-temps _ Forebet Football.htm": f"{BASE_URL}/mi-temps",
 }
 
 # Le tableau des rencontres : sa presence signe une page reellement chargee.

@@ -17,7 +17,9 @@ Rien ne sort de ta machine : le LLM tourne dans LM Studio, sur le GPU.
 Il **croise quatre sources** pour chaque rencontre pariable :
 
 1. **Forebet** — les probabilités publiées par un site de pronostics, prises comme un
-   avis extérieur, pas comme une vérité. URLS pour le fichiers Forebet.htm = https://www.forebet.com/en/football-tips-and-predictions-for-today/predictions-both-to-score
+   avis extérieur, pas comme une vérité. Les cinq pages enregistrées sont
+   <https://www.forebet.com/fr/pronostics-pour-aujourd-hui> et ses marchés
+   `/chaque-equipe-marque`, `/moins-plus-2-5-de-buts`, `/chance-double`, `/mi-temps`.
 2. **Flashscore** — les statistiques brutes : vingt derniers matchs de chaque équipe
    (adversaire, lieu et score de chacun), confrontations directes, classement de la compétition
    (position, points, buts encaissés sur la saison), et l'heure, la compétition et le
@@ -676,13 +678,11 @@ Forebet est derrière Cloudflare, qui bloque aussi bien la requête HTTP directe
 Chromium piloté par Playwright. **La seule méthode qui fonctionne** est d'enregistrer la
 page depuis ton navigateur, chaque jour :
 
-1. Ouvre <https://www.forebet.com/en/football-tips-and-predictions-for-today> dans ton
+1. Ouvre <https://www.forebet.com/fr/pronostics-pour-aujourd-hui> dans ton
    navigateur habituel (Firefox ou Chrome).
 2. **Ctrl+S**, type « Page Web, complète » (ou « HTML seul », les deux marchent).
 3. **Renomme le fichier `Forebet.htm`** et place-le **à la racine du projet**, à côté de
-   `analyse.cmd`. Le fichier téléchargé s'appelle par défaut
-   `Football Predictions for Today _ Forebet.htm` : renommé, il est repris
-   automatiquement, sans avoir à taper de chemin.
+   `analyse.cmd`. Renommé, il est repris automatiquement, sans avoir à taper de chemin.
 4. Lance `analyse.cmd` : il affiche « Forebet.htm trouve » et croise les pronostics avec
    les cotes Unibet du jour.
 
@@ -693,40 +693,42 @@ Si tu préfères le garder ailleurs, indique son chemin (guillemets obligatoires
 contient des espaces) :
 
 ```powershell
-python -m betbot --forebet-html "C:\Users\<toi>\Desktop\Football Predictions for Today _ Forebet.htm" --today --only-bettable
+python -m betbot --forebet-html "C:\Users\<toi>\Desktop\Pronostics de football pour aujourd'hui _ Forebet.htm" --today --only-bettable
 ```
 
 ### Pages Forebet par marché (1X2, les deux marquent, +/-2.5, double chance, mi-temps)
 
 Forebet publie une page par marché. Enregistre-les de la même façon (Ctrl+S) **dans le
 dossier du projet, sans les renommer** : Bet.Bot ramasse tout seul les fichiers
-`Predictions*.htm` du dossier courant (et de celui de `Bet.Bot.exe`), et affiche « Page
-Forebet trouvee : ... » pour chacun. Rien d'autre à faire, que tu passes par
-`analyse.cmd`, `python -m betbot` ou l'exécutable.
+`Pronostics*.htm` (et `Predictions*.htm`, pour les fichiers anglais déjà enregistrés) du
+dossier courant et de celui de `Bet.Bot.exe`, et affiche « Page Forebet trouvee : ... »
+pour chacun. Rien d'autre à faire, que tu passes par `analyse.cmd`, `python -m betbot` ou
+l'exécutable.
 
 En ligne de commande, chaque fichier se passe à `--forebet-market-html`, option
 répétable :
 
 ```powershell
 python -m betbot --from-unibet --today `
-  --forebet-market-html "Predictions 1X2 _ Today Forebet Football.htm" `
-  --forebet-market-html "Predictions Both to score _ Today Forebet Football.htm" `
-  --forebet-market-html "Predictions Under_Over 2.5 goals _ Today Forebet Football.htm" `
-  --forebet-market-html "Predictions Double chance _ Today Forebet Football.htm" `
-  --forebet-market-html "Predictions Half Time (HT) _ Today Forebet Football.htm"
+  --forebet-market-html "Pronostics 1X2 _ Forebet Football.htm" `
+  --forebet-market-html "Pronostics Chaque equipe marque _ Forebet Football.htm" `
+  --forebet-market-html "Pronostics Moins-Plus 2.5 de buts _ Forebet Football.htm" `
+  --forebet-market-html "Pronostics Chance double _ Forebet Football.htm" `
+  --forebet-market-html "Pronostics Mi-temps _ Forebet Football.htm"
 ```
 
-Pages reconnues (le type est déduit du titre de la page, l'ordre des fichiers est libre) :
+Pages reconnues (le type est déduit du titre de la page, l'ordre des fichiers est libre ;
+les titres anglais des anciennes pages `/en/` sont lus aussi) :
 
 | Page Forebet | Marchés ajoutés au rapport |
 | --- | --- |
-| `predictions-1x2` | 1, N, 2 du temps réglementaire, score exact et moyenne de buts |
-| `both-to-score` | Les deux marquent : oui / non |
-| `under-over-25-goals` | Plus de 2.5 buts / Moins de 2.5 buts |
-| `double-chance-predictions` | 1N, 12, N2 |
-| `predictions-ht` | 1, N, 2 de la 1re mi-temps |
+| <https://www.forebet.com/fr/pronostics-pour-aujourd-hui> | 1, N, 2 du temps réglementaire, score exact et moyenne de buts |
+| <https://www.forebet.com/fr/pronostics-pour-aujourd-hui/chaque-equipe-marque> | Les deux marquent : oui / non |
+| <https://www.forebet.com/fr/pronostics-pour-aujourd-hui/moins-plus-2-5-de-buts> | Plus de 2.5 buts / Moins de 2.5 buts |
+| <https://www.forebet.com/fr/pronostics-pour-aujourd-hui/chance-double> | 1N, 12, N2 |
+| <https://www.forebet.com/fr/pronostics-pour-aujourd-hui/mi-temps> | 1, N, 2 de la 1re mi-temps |
 
-La page <https://www.forebet.com/en/football-tips-and-predictions-for-today/predictions-1x2>
+La page <https://www.forebet.com/fr/pronostics-pour-aujourd-hui>
 est la plus utile des cinq avec `--from-unibet` : en partant du listing du bookmaker,
 c'est la seule source du pronostic Forebet lui-même. Sans elle, la ligne « Forebet » du
 tableau de comparaison reste vide et il ne reste que le modèle face au marché.

@@ -158,6 +158,41 @@ class TestForebetMarketPages(unittest.TestCase):
         )
         self.assertEqual(prediction.predicted_score, "2-1")
 
+    def test_the_french_pages_are_read_the_same_way(self) -> None:
+        """Ce sont celles que Bet.Bot enregistre : leurs titres et pronostics sont en
+        francais, accents compris."""
+        page, (btts,) = parse_market_page(
+            _market_page(
+                "Pronostics Chaque \u00e9quipe marque | Forebet Football", "Oui", "63"
+            )
+        )
+        self.assertEqual(page, "both to score")
+        self.assertEqual(btts.markets["Les deux marquent : oui"], 63.0)
+        self.assertEqual(btts.markets["Les deux marquent : non"], 37.0)
+
+        page, (goals,) = parse_market_page(
+            _market_page("Pronostics Moins-Plus 2.5 de buts | Forebet", "Plus", "58")
+        )
+        self.assertEqual(page, "under/over 2.5 goals")
+        self.assertEqual(goals.markets["Plus de 2.5 buts"], 58.0)
+
+        page, (chance,) = parse_market_page(
+            _market_page("Pronostics Chance double | Forebet", "1N", "77")
+        )
+        self.assertEqual(page, "double chance")
+        self.assertEqual(chance.markets, {"1N": 77.0})
+
+        page, (half,) = parse_market_page(
+            _market_page(
+                "Pronostics Mi-temps | Forebet",
+                "N",
+                "42",
+                columns="<span>33</span><span>42</span><span>25</span>",
+            )
+        )
+        self.assertEqual(page, "half time")
+        self.assertEqual(half.markets["N (1re mi-temps)"], 42.0)
+
     def test_rejects_an_unrelated_page(self) -> None:
         with self.assertRaises(FetchError):
             parse_market_page("<html><head><title>Forebet</title></head></html>")
@@ -167,7 +202,7 @@ class TestDiscoverMarketPages(unittest.TestCase):
     def test_finds_saved_pages_in_the_current_folder(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            (root / "Predictions Both to score _ Today Forebet Football.htm").touch()
+            (root / "Pronostics Chaque equipe marque _ Forebet Football.htm").touch()
             (root / "Predictions Double chance _ Today Forebet Football.html").touch()
             (root / "Forebet.htm").touch()
             with (
@@ -178,7 +213,7 @@ class TestDiscoverMarketPages(unittest.TestCase):
         self.assertEqual(
             found,
             {
-                "Predictions Both to score _ Today Forebet Football.htm",
+                "Pronostics Chaque equipe marque _ Forebet Football.htm",
                 "Predictions Double chance _ Today Forebet Football.html",
             },
         )
@@ -220,12 +255,14 @@ class TestOpenReport(unittest.TestCase):
 class TestForebetPages(unittest.TestCase):
     """Enregistrement automatique des pages Forebet."""
 
-    def test_every_page_has_a_predictions_filename(self) -> None:
+    def test_every_page_has_a_pronostics_filename_and_a_french_url(self) -> None:
         # C'est ce prefixe qui fait ramasser les fichiers par l'analyse suivante.
         for filename, url in FOREBET_PAGES.items():
-            self.assertTrue(filename.startswith("Predictions"), filename)
+            self.assertTrue(filename.startswith("Pronostics"), filename)
             self.assertTrue(filename.endswith(".htm"), filename)
-            self.assertTrue(url.startswith("https://www.forebet.com/"), url)
+            self.assertTrue(
+                url.startswith("https://www.forebet.com/fr/pronostics-pour-aujourd-hui"), url
+            )
 
     def test_the_cloudflare_wait_page_is_recognised(self) -> None:
         self.assertTrue(_is_challenge("Just a moment...", "<html>cf-chl</html>"))

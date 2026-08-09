@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
@@ -20,6 +21,12 @@ log = logging.getLogger(__name__)
 
 BASE = "https://www.forebet.com"
 _NUMBER = re.compile(r"-?\d+(?:[.,]\d+)?")
+
+
+def _fold(text: str) -> str:
+    """Minuscules sans accents : « Mi-Temps » et « mi-temps » se comparent pareil."""
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
 def _to_float(text: str | None) -> float | None:
@@ -103,13 +110,46 @@ HALF_TIME_MARKETS = ("1 (1re mi-temps)", "N (1re mi-temps)", "2 (1re mi-temps)")
 # Pages Forebet consacrees a un seul marche : le titre de la page les distingue, et
 # `forepr` donne le pronostic dont `fpr` est la probabilite. Le marche complementaire
 # vaut 100 moins cette probabilite, les deux issues etant exclusives.
-_TWO_WAY_PAGES: dict[str, tuple[str, str, str]] = {
-    # titre -> (pronostic positif, marche correspondant, marche complementaire)
-    "both to score": ("yes", "Les deux marquent : oui", "Les deux marquent : non"),
-    "under/over 2.5 goals": ("over", "Plus de 2.5 buts", "Moins de 2.5 buts"),
+_TWO_WAY_PAGES: dict[str, tuple[tuple[str, ...], str, str]] = {
+    # page -> (pronostics positifs, marche correspondant, marche complementaire)
+    "both to score": (
+        ("yes", "oui"),
+        "Les deux marquent : oui",
+        "Les deux marquent : non",
+    ),
+    "under/over 2.5 goals": (
+        ("over", "plus", "+"),
+        "Plus de 2.5 buts",
+        "Moins de 2.5 buts",
+    ),
 }
-# Doubles chances : Forebet ecrit indifferemment 1X ou X1, le modele n'ecrit que 1N.
-_DOUBLE_CHANCE = {"1x": "1N", "x1": "1N", "x2": "N2", "2x": "N2", "12": "12", "21": "12"}
+# Doubles chances : Forebet ecrit indifferemment 1X ou X1, et N a la place de X sur ses
+# pages francaises. Le modele, lui, n'ecrit que 1N.
+_DOUBLE_CHANCE = {
+    "1x": "1N",
+    "x1": "1N",
+    "1n": "1N",
+    "n1": "1N",
+    "x2": "N2",
+    "2x": "N2",
+    "n2": "N2",
+    "2n": "N2",
+    "12": "12",
+    "21": "12",
+}
+
+# Titres reconnus par page, en anglais et en francais (accents retires). Les plus
+# specifiques d'abord : « mi-temps » avant « 1x2 », qui apparait dans les deux.
+_PAGE_TITLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("both to score", ("both to score", "chaque equipe marque", "les deux equipes marquent")),
+    (
+        "under/over 2.5 goals",
+        ("under/over 2.5", "under_over 2.5", "moins-plus 2.5", "moins/plus 2.5", "2.5 de buts"),
+    ),
+    ("double chance", ("double chance", "chance double")),
+    ("half time", ("half time", "mi-temps", "mi temps")),
+    ("1x2", ("1x2",)),
+)
 
 
 def _market_probabilities(row: Tag, page: str) -> dict[str, float]:
@@ -126,10 +166,10 @@ def _market_probabilities(row: Tag, page: str) -> dict[str, float]:
     if not pick or probability is None:
         return {}
 
-    pick = pick.strip().lower()
+    pick = _fold(pick)
     if page in _TWO_WAY_PAGES:
-        positive, market, opposite = _TWO_WAY_PAGES[page]
-        if pick.startswith(positive):
+        positives, market, opposite = _TWO_WAY_PAGES[page]
+        if pick.startswith(positives):
             return {market: probability, opposite: round(100 - probability, 2)}
         return {market: round(100 - probability, 2), opposite: probability}
 
@@ -151,10 +191,10 @@ def _market_probabilities(row: Tag, page: str) -> dict[str, float]:
 def market_page_kind(html: str | bytes) -> str | None:
     """Marche traite par une page Forebet specialisee, d'apres son titre."""
     soup = BeautifulSoup(html, "html.parser")
-    title = soup.title.get_text(" ", strip=True).lower() if soup.title else ""
-    for key in (*_TWO_WAY_PAGES, "double chance", "half time", "1x2"):
-        if key in title:
-            return key
+    title = _fold(soup.title.get_text(" ", strip=True)) if soup.title else ""
+    for page, titles in _PAGE_TITLES:
+        if any(marker in title for marker in titles):
+            return page
     return None
 
 
@@ -168,8 +208,9 @@ def parse_market_page(html: str | bytes) -> tuple[str, list[ForebetPrediction]]:
     page = market_page_kind(html)
     if page is None:
         raise FetchError(
-            "Page Forebet non reconnue : attendu une page « 1X2 », « Both to score », "
-            "« Under/Over 2.5 goals », « Double chance » ou « Half Time (HT) »."
+            "Page Forebet non reconnue : attendu une page « 1X2 », « Chaque equipe "
+            "marque », « Moins/Plus 2.5 de buts », « Chance double » ou « Mi-temps » "
+            "(leurs equivalents anglais sont lus aussi)."
         )
 
     soup = BeautifulSoup(html, "html.parser")

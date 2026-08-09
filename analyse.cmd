@@ -35,7 +35,7 @@ if not "%~1"=="" (
     goto :fin
 )
 
-rem Les pages Forebet par marche ("Predictions Both to score _ Today Forebet
+rem Les pages Forebet par marche ("Pronostics Chaque equipe marque _ Forebet
 rem Football.htm", ...) posees ici sont ramassees par Bet.Bot lui-meme.
 
 if exist "Forebet.htm" (
