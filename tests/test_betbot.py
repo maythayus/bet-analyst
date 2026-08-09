@@ -14,12 +14,15 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from betbot import demo, poisson
+from betbot import demo, poisson, trap
 from betbot.cli import discover_market_pages, open_report
 from betbot.combo import (
     BTTS_NO,
     BTTS_YES,
     KELLY_MAX_SHARE,
+    SOURCE_FOREBET,
+    SOURCE_MODEL,
+    _leg_for,
     build_btts_mix_ticket,
     build_ticket,
     build_value_ticket,
@@ -32,6 +35,7 @@ from betbot.models import (
     MatchBundle,
     MatchStats,
     PoissonResult,
+    TableStanding,
     TeamForm,
 )
 from betbot.pipeline import (
@@ -930,6 +934,188 @@ class TestBttsMixTicket(unittest.TestCase):
         self.assertEqual(
             sorted(leg.probability for leg in ticket.legs), [80.0, 80.0, 90.0, 90.0]
         )
+
+
+class TestForebetSourcedLegs(unittest.TestCase):
+    """Sur les marches que Forebet publie, sa probabilite prime, a partir de 60 %."""
+
+    def _bundle(self, *, model: float, forebet: float | None) -> MatchBundle:
+        stats = MatchStats(home_team="Equipe", away_team="Visiteur", kickoff="2026-07-26 18:00")
+        prediction = (
+            ForebetPrediction(
+                home_team="Equipe",
+                away_team="Visiteur",
+                markets={BTTS_YES: forebet, BTTS_NO: 100 - forebet},
+            )
+            if forebet is not None
+            else None
+        )
+        return MatchBundle(
+            stats=stats,
+            forebet=prediction,
+            poisson=PoissonResult(
+                prob_home=40.0,
+                prob_draw=30.0,
+                prob_away=30.0,
+                prob_over_25=50.0,
+                prob_btts=model,
+                expected_home_goals=1.4,
+                expected_away_goals=1.1,
+                most_likely_score="1-1",
+                markets={BTTS_YES: model, BTTS_NO: 100 - model},
+            ),
+            bookmakers=[BookmakerLine(bookmaker="Unibet", odds={BTTS_YES: 1.60, BTTS_NO: 2.20})],
+        )
+
+    def test_forebet_probability_replaces_the_model(self) -> None:
+        bundle = self._bundle(model=85.0, forebet=64.0)
+        leg = _leg_for(bundle, BTTS_YES, 1.60, 55.0)
+        assert leg is not None
+        self.assertEqual((leg.probability, leg.source), (64.0, SOURCE_FOREBET))
+
+    def test_below_sixty_percent_forebet_rejects_the_selection(self) -> None:
+        """Le modele a beau etre enthousiaste, c'est Forebet qui decide sur ce marche."""
+        self.assertIsNone(_leg_for(self._bundle(model=90.0, forebet=58.0), BTTS_YES, 1.60, 55.0))
+
+    def test_the_model_still_answers_where_forebet_says_nothing(self) -> None:
+        leg = _leg_for(self._bundle(model=70.0, forebet=None), BTTS_YES, 1.60, 55.0)
+        assert leg is not None
+        self.assertEqual((leg.probability, leg.source), (70.0, SOURCE_MODEL))
+
+
+class TestTraps(unittest.TestCase):
+    """Matchs pieges : confrontations directes, classement et solidite des defenses."""
+
+    def _stats(self, **changes: object) -> MatchStats:
+        base = MatchStats(
+            home_team="Recevant",
+            away_team="Visiteur",
+            home_table=TableStanding(
+                name="Recevant", position=5, played=20, draws=4, goals_against=25
+            ),
+            away_table=TableStanding(
+                name="Visiteur", position=12, played=20, draws=4, goals_against=25
+            ),
+        )
+        return replace(base, **changes)
+
+    def test_two_solid_defences_condemn_both_teams_to_score(self) -> None:
+        stats = self._stats(
+            home_table=TableStanding(name="Recevant", position=1, played=20, goals_against=12),
+            away_table=TableStanding(name="Visiteur", position=14, played=20, goals_against=16),
+        )
+        self.assertTrue(trap.is_trap(stats, BTTS_YES))
+        self.assertFalse(trap.is_trap(stats, BTTS_NO))
+
+    def test_a_leaky_defence_condemns_the_clean_sheet(self) -> None:
+        stats = self._stats(
+            away_table=TableStanding(name="Visiteur", position=18, played=20, goals_against=40)
+        )
+        self.assertTrue(trap.is_trap(stats, BTTS_NO))
+        reasons = trap.trap_reasons(stats, BTTS_NO)
+        self.assertIn("Visiteur", reasons[0])
+
+    def test_head_to_head_contradicts_the_selection(self) -> None:
+        closed = self._stats(
+            head_to_head=["10.05. Recevant 0-0 Visiteur", "12.12. Visiteur 1-0 Recevant"]
+        )
+        self.assertTrue(trap.is_trap(closed, BTTS_YES))
+        self.assertAlmostEqual(trap.head_to_head_goals(closed), 0.5)
+
+    def test_a_date_is_not_a_score(self) -> None:
+        """« 2026-03-02 » ne doit pas se lire comme un 2026-3."""
+        dated = self._stats(
+            head_to_head=[
+                "2026-03-02 Visiteur 1-2 Recevant",
+                "2025-10-19 Recevant 3-1 Visiteur",
+            ]
+        )
+        self.assertAlmostEqual(trap.head_to_head_goals(dated), 3.5)
+
+    def test_a_single_meeting_proves_nothing(self) -> None:
+        self.assertIsNone(trap.head_to_head_goals(self._stats(head_to_head=["10.05. A 0-0 B"])))
+
+    def test_neighbours_in_the_table_play_a_tense_match(self) -> None:
+        stats = self._stats(
+            home_table=TableStanding(name="Recevant", position=6, played=20, goals_against=25),
+            away_table=TableStanding(name="Visiteur", position=7, played=20, goals_against=25),
+        )
+        self.assertTrue(trap.is_trap(stats, BTTS_YES))
+        self.assertTrue(trap.is_trap(stats, "12"))
+
+    def test_a_draw_prone_pair_makes_the_no_draw_fragile(self) -> None:
+        stats = self._stats(
+            home_table=TableStanding(name="Recevant", position=3, played=20, draws=9),
+            away_table=TableStanding(name="Visiteur", position=15, played=20, draws=2),
+        )
+        self.assertTrue(trap.is_trap(stats, "12"))
+
+    def test_a_better_placed_visitor_undermines_the_home_double_chance(self) -> None:
+        stats = self._stats(
+            home_table=TableStanding(name="Recevant", position=14, played=20, goals_against=25),
+            away_table=TableStanding(name="Visiteur", position=2, played=20, goals_against=25),
+        )
+        self.assertTrue(trap.is_trap(stats, "1N"))
+        self.assertFalse(trap.is_trap(stats, "N2"))
+
+    def test_a_closed_predicted_score_kills_both_teams_to_score(self) -> None:
+        """0-0, 1-0 et 0-1 sont les scores ou un seul but retourne le pronostic."""
+        bare = MatchStats(home_team="A", away_team="B")
+        for score in ("0-0", "1-0", "0-1"):
+            self.assertTrue(trap.is_trap(bare, BTTS_YES, score), score)
+            self.assertTrue(trap.is_trap(bare, "12", score), score)
+        for score in ("2-1", "1-1", "3-0"):
+            self.assertFalse(trap.is_trap(bare, BTTS_YES, score), score)
+
+    def test_an_unreadable_predicted_score_says_nothing(self) -> None:
+        self.assertFalse(trap.predicted_closed_game(None))
+        self.assertFalse(trap.predicted_closed_game("?"))
+
+    def test_nothing_to_say_without_flashscore_data(self) -> None:
+        bare = MatchStats(home_team="A", away_team="B")
+        self.assertEqual(
+            [trap.trap_reasons(bare, market) for market in trap.TRAP_MARKETS], [[]] * 5
+        )
+
+
+class TestFlashscoreStandings(unittest.TestCase):
+    """Lecture du classement Flashscore, sans reseau."""
+
+    class _Cell:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def inner_text(self) -> str:
+            return self._text
+
+    class _Page:
+        def __init__(self, rows: list[str]) -> None:
+            self._rows = rows
+
+        def query_selector_all(self, selector: str) -> list[TestFlashscoreStandings._Cell]:
+            assert selector == ".ui-table__row"
+            return [TestFlashscoreStandings._Cell(row) for row in self._rows]
+
+    def test_reads_rank_goals_and_points(self) -> None:
+        page = self._Page(
+            [
+                "1.\nArsenal\n38\n26\n7\n5\n71:27\n44\n85\nW\nW",
+                "2.\nManchester City\n38\n23\n9\n6\n77:35\n42\n78\nL\nD",
+                "Classement complet",
+            ]
+        )
+        table = flashscore._parse_standings(page)
+        self.assertEqual([row.name for row in table], ["Arsenal", "Manchester City"])
+        self.assertEqual((table[0].position, table[0].points), (1, 85))
+        self.assertAlmostEqual(table[0].conceded_per_game, 27 / 38)
+        self.assertAlmostEqual(table[1].draw_share, 9 / 38)
+
+    def test_finds_a_team_by_resemblance(self) -> None:
+        table = [TableStanding(name="Manchester City", position=2)]
+        found = flashscore.standing_for("Man City", table)
+        assert found is not None
+        self.assertEqual(found.position, 2)
+        self.assertIsNone(flashscore.standing_for("Arsenal", table))
 
 
 class TestFlashscoreKickoff(unittest.TestCase):

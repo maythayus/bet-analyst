@@ -13,6 +13,7 @@ from math import prod
 
 from betbot.models import MatchBundle
 from betbot.poisson import CALIBRATED_SOURCES
+from betbot.trap import trap_reasons
 
 # Chez les bookmakers le nul s'ecrit X, dans le modele il s'ecrit N.
 _SIGN_TO_MARKET = {"X": "N"}
@@ -22,6 +23,13 @@ VALUE_TICKET_SIZES = (6, 8)
 BTTS_YES = "Les deux marquent : oui"
 BTTS_NO = "Les deux marquent : non"
 BTTS_MIX_LABEL = "Combine 4 selections (2 x les deux marquent oui, 2 x non)"
+# Marches ou Forebet publie sa propre probabilite : elle est preferee a celle du modele,
+# etant tiree d'un historique bien plus large que cinq matchs de forme.
+FOREBET_MARKETS = (BTTS_YES, BTTS_NO, "1N", "N2", "12")
+# Seuil applique aux probabilites Forebet de ces marches.
+FOREBET_MIN_PROBABILITY = 60.0
+SOURCE_FOREBET = "Forebet"
+SOURCE_MODEL = "modele"
 # Une selection a moins d'une chance sur deux n'a rien a faire dans un combine long :
 # huit selections a 50 % ne passent qu'une fois sur 256.
 MIN_LEG_PROBABILITY = 55.0
@@ -67,6 +75,8 @@ class Leg:
     probability: float  # en %
     odds: float | None = None
     kickoff: str | None = None
+    # Origine de la probabilite : Forebet quand il publie le marche, le modele sinon.
+    source: str = SOURCE_MODEL
 
     @property
     def fair_odds(self) -> float:
@@ -132,30 +142,54 @@ class Ticket:
         return round(stake * odds, 2) if odds else None
 
 
+def _leg_for(
+    bundle: MatchBundle, market: str, odds: float | None, min_probability: float
+) -> Leg | None:
+    """Selection d'un marche, ecartee si elle est trop peu probable ou piegeuse.
+
+    Sur les marches que Forebet publie (les deux marquent oui/non, doubles chances), sa
+    probabilite remplace celle du modele et doit atteindre 60 % : elle repose sur un
+    historique bien plus large que cinq matchs de forme. Ailleurs le modele reste seul.
+
+    Une selection designee comme piege par `betbot.trap` est refusee quelle que soit sa
+    probabilite : classement serre, defenses trop solides ou trop friables, ou
+    confrontations directes qui racontent l'inverse.
+    """
+    forebet = bundle.forebet.markets.get(market) if bundle.forebet else None
+    if market in FOREBET_MARKETS and forebet is not None:
+        probability, source = forebet, SOURCE_FOREBET
+        floor = max(min_probability, FOREBET_MIN_PROBABILITY)
+    else:
+        model = bundle.poisson.markets.get(market) if bundle.poisson else None
+        if model is None:
+            return None
+        probability, source, floor = model, SOURCE_MODEL, min_probability
+
+    if probability < floor or trap_reasons(bundle.stats, market, bundle.predicted_score):
+        return None
+    return Leg(bundle.label, market, probability, odds, bundle.stats.kickoff, source)
+
+
 def _best_selection(bundle: MatchBundle, market: str | None) -> Leg | None:
     """Selection la plus probable d'un match, eventuellement restreinte a un marche."""
     if not bundle.poisson or not bundle.poisson.markets:
         return None
 
-    prices = {
-        _SIGN_TO_MARKET.get(sign, sign): value for sign, value in bundle.best_odds().items()
-    }
+    prices = bundle.market_prices()
     if market:
-        probability = bundle.poisson.markets.get(market)
-        if probability is None:
-            return None
-        return Leg(bundle.label, market, probability, prices.get(market), bundle.stats.kickoff)
+        return _leg_for(bundle, market, prices.get(market), 0.0)
 
     # Sans marche impose, seuls les marches cotes ont un interet, et pas a n'importe
     # quel prix : « plus de 0.5 but » a 1.02 est la selection la plus probable de
     # n'importe quel match, et la moins interessante a jouer.
-    priced = {
-        name: probability
-        for name, probability in bundle.poisson.markets.items()
-        if prices.get(name, 0) >= MIN_LEG_ODDS
-    }
-    name, probability = max((priced or bundle.poisson.markets).items(), key=lambda item: item[1])
-    return Leg(bundle.label, name, probability, prices.get(name), bundle.stats.kickoff)
+    candidates = [
+        leg
+        for name in bundle.poisson.markets
+        if (leg := _leg_for(bundle, name, prices.get(name), 0.0))
+    ]
+    priced = [leg for leg in candidates if (leg.odds or 0) >= MIN_LEG_ODDS]
+    kept = priced or candidates
+    return max(kept, key=_leg_probability) if kept else None
 
 
 def build_ticket(
@@ -228,35 +262,26 @@ def _priced_selections(
     """
     if not bundle.poisson or not bundle.poisson.markets:
         return []
-    prices = {
-        _SIGN_TO_MARKET.get(sign, sign): value for sign, value in bundle.best_odds().items()
-    }
     legs = [
-        Leg(bundle.label, market, probability, odds, bundle.stats.kickoff)
-        for market, odds in prices.items()
-        if odds >= MIN_LEG_ODDS
-        and (probability := bundle.poisson.markets.get(market, 0.0)) >= min_probability
+        leg
+        for market, odds in bundle.market_prices().items()
+        if odds >= MIN_LEG_ODDS and (leg := _leg_for(bundle, market, odds, min_probability))
     ]
     if max_value is None:
         return legs
     return [leg for leg in legs if _leg_value(leg) <= max_value]
 
 
-def _market_legs(
-    bundles: list[MatchBundle], market: str, min_probability: float
-) -> list[Leg]:
+def _market_legs(bundles: list[MatchBundle], market: str, min_probability: float) -> list[Leg]:
     """Selections cotees d'un seul marche, une par match, au-dessus du seuil de proba."""
     legs: list[Leg] = []
     for bundle in bundles:
-        if not bundle.poisson:
-            continue
-        probability = bundle.poisson.markets.get(market)
-        odds = bundle.best_odds().get(market)
-        if probability is None or probability < min_probability:
-            continue
+        odds = bundle.market_prices().get(market)
         if not odds or odds < MIN_LEG_ODDS:
             continue
-        legs.append(Leg(bundle.label, market, probability, odds, bundle.stats.kickoff))
+        leg = _leg_for(bundle, market, odds, min_probability)
+        if leg:
+            legs.append(leg)
     return legs
 
 

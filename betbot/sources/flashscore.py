@@ -25,7 +25,7 @@ from typing import Any
 import requests
 
 from betbot.config import USER_AGENT, ScrapeConfig
-from betbot.models import MatchStats, TeamForm
+from betbot.models import MatchStats, TableStanding, TeamForm
 from betbot.sources.bookmakers import normalise, similarity
 
 log = logging.getLogger(__name__)
@@ -33,8 +33,14 @@ log = logging.getLogger(__name__)
 SEARCH_URL = "https://s.flashscore.com/search/"
 TEAM_URL = "https://www.flashscore.com/team/{slug}/{team_id}/results/"
 FIXTURES_URL = "https://www.flashscore.com/team/{slug}/{team_id}/fixtures/"
+STANDINGS_URL = "https://www.flashscore.com/team/{slug}/{team_id}/standings/"
 # Heure d'un match a venir : « 03.08. 15:30 ».
 _FIXTURE_TIME = re.compile(r"(\d{2})\.(\d{2})\.\s*(\d{2}:\d{2})")
+# Rang d'une ligne de classement (« 1. ») et colonne des buts (« 71:27 »).
+_STANDING_RANK = re.compile(r"^(\d+)\.")
+_STANDING_GOALS = re.compile(r"^(\d+)\s*:\s*(\d+)$")
+# Colonnes lues a gauche de celle des buts : joues, gagnes, nuls, perdus.
+_STANDING_COLUMNS = 4
 FOOTBALL_SPORT_ID = 1
 # La recherche renvoie aussi des joueurs (type 2), dont le libelle ressemble a un club :
 # « Rousseau Thomas (Le Havre) » ne doit pas etre pris pour « Dunav Rousse ».
@@ -483,15 +489,20 @@ def _flashscore_page(cfg: ScrapeConfig, url: str) -> Iterator[Any]:
             browser.close()
 
 
-def _matches_appeared(page: Any, cfg: ScrapeConfig) -> bool:
-    """Attend la liste des rencontres, rendue en JavaScript apres le chargement."""
+def _appeared(page: Any, selector: str, cfg: ScrapeConfig) -> bool:
+    """Attend un element rendu en JavaScript apres le chargement de la page."""
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
     try:
-        page.wait_for_selector("div.event__match", timeout=cfg.flashscore_timeout_ms)
+        page.wait_for_selector(selector, timeout=cfg.flashscore_timeout_ms)
     except PlaywrightTimeout:
         return False
     return True
+
+
+def _matches_appeared(page: Any, cfg: ScrapeConfig) -> bool:
+    """Attend la liste des rencontres, rendue en JavaScript apres le chargement."""
+    return _appeared(page, "div.event__match", cfg)
 
 
 def fetch_next_fixture(team: Team, opponent: str, cfg: ScrapeConfig) -> Fixture | None:
@@ -506,6 +517,74 @@ def fetch_next_fixture(team: Team, opponent: str, cfg: ScrapeConfig) -> Fixture 
             log.info("Flashscore : aucun match a venir affiche sur %s", url)
             return None
         return _parse_fixtures_page(page, opponent)
+
+
+def _parse_standings(page: Any) -> list[TableStanding]:
+    """Classement complet affiche par Flashscore, une entree par equipe.
+
+    Une ligne se lit « 1. Arsenal 38 26 7 5 71:27 44 85 » : la colonne des buts sert de
+    repere, les compteurs de matchs sont a sa gauche et les points a sa droite. Les
+    lignes qui ne suivent pas ce schema (entetes, tableaux partiels) sont ignorees.
+    """
+    table: list[TableStanding] = []
+    for row in page.query_selector_all(".ui-table__row"):
+        cells = [line.strip() for line in row.inner_text().splitlines() if line.strip()]
+        rank = _STANDING_RANK.match(cells[0]) if cells else None
+        scored = next(
+            (
+                (index, found)
+                for index, cell in enumerate(cells)
+                if (found := _STANDING_GOALS.match(cell))
+            ),
+            None,
+        )
+        if not rank or scored is None or scored[0] < _STANDING_COLUMNS + 1:
+            continue
+
+        goals_at, goals = scored
+        counters = cells[goals_at - _STANDING_COLUMNS : goals_at]
+        points = cells[goals_at + 2] if len(cells) > goals_at + 2 else "0"
+        try:
+            played, wins, draws = (int(value) for value in counters[:3])
+            table.append(
+                TableStanding(
+                    name=cells[1],
+                    position=int(rank.group(1)),
+                    played=played,
+                    wins=wins,
+                    draws=draws,
+                    goals_for=int(goals.group(1)),
+                    goals_against=int(goals.group(2)),
+                    points=int(points),
+                )
+            )
+        except ValueError:
+            continue
+    return table
+
+
+def standing_for(name: str, table: list[TableStanding]) -> TableStanding | None:
+    """Ligne de classement d'une equipe, reconnue par ressemblance de nom."""
+    if not table:
+        return None
+    best = max(table, key=lambda row: score_candidate(name, row.name))
+    if score_candidate(name, best.name) < NAME_THRESHOLD:
+        log.info("Flashscore : %s absent du classement affiche", name)
+        return None
+    return best
+
+
+def fetch_standings(team: Team, cfg: ScrapeConfig) -> list[TableStanding]:
+    """Classement de la competition principale d'une equipe, vide s'il n'y en a pas.
+
+    Une coupe ou un match amical n'a pas de classement : l'absence n'est pas une erreur.
+    """
+    url = STANDINGS_URL.format(slug=team.slug, team_id=team.identifier)
+    with _flashscore_page(cfg, url) as page:
+        if not _appeared(page, ".ui-table__row", cfg):
+            log.info("Flashscore : aucun classement affiche sur %s", url)
+            return []
+        return _parse_standings(page)
 
 
 def fetch_team_results(team: Team, cfg: ScrapeConfig, *, limit: int = 10) -> list[PastMatch]:
@@ -584,6 +663,7 @@ def fetch_match_stats(
 
     home, home_matches = team_with_results(home_choices, cfg)
     away, away_matches = team_with_results(away_choices, cfg)
+    home_title = home.title.split(" (")[0]
     away_title = away.title.split(" (")[0]
 
     fixture = Fixture()
@@ -591,6 +671,14 @@ def fetch_match_stats(
         fixture = fetch_next_fixture(home, away_title, cfg) or Fixture()
     except (FlashscoreUnavailable, OSError, ValueError) as exc:
         log.info("Flashscore : calendrier de %s illisible (%s)", home.title, exc)
+
+    table: list[TableStanding] = []
+    try:
+        table = fetch_standings(home, cfg)
+    except (FlashscoreUnavailable, OSError, ValueError) as exc:
+        log.info("Flashscore : classement de %s illisible (%s)", home.title, exc)
+    home_standing = standing_for(home_title, table)
+    away_standing = standing_for(away_title, table)
 
     return MatchStats(
         home_team=home_team,
@@ -600,8 +688,10 @@ def fetch_match_stats(
         # Le pays de l'entete du calendrier, sinon celui accole au nom de l'equipe
         # recevante : une coupe d'Europe n'en designe aucun, le stade si.
         country=fixture.country or _origin(home.title),
-        home_form=build_form(home.title.split(" (")[0], home_matches),
+        home_form=build_form(home_title, home_matches),
         away_form=build_form(away_title, away_matches),
         head_to_head=head_to_head(home_matches, away_title),
+        home_table=home_standing,
+        away_table=away_standing,
         url=TEAM_URL.format(slug=home.slug, team_id=home.identifier),
     )

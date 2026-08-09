@@ -19,7 +19,9 @@ Il **croise quatre sources** pour chaque rencontre pariable :
 1. **Forebet** — les probabilités publiées par un site de pronostics, prises comme un
    avis extérieur, pas comme une vérité. URLS pour le fichiers Forebet.htm = https://www.forebet.com/en/football-tips-and-predictions-for-today/predictions-both-to-score
 2. **Flashscore** — les statistiques brutes : cinq derniers matchs de chaque équipe,
-   buts marqués et encaissés, confrontations directes.
+   buts marqués et encaissés, confrontations directes, classement de la compétition
+   (position, points, buts encaissés sur la saison), et l'heure, la compétition et le
+   pays de la rencontre.
 3. **Modèle de Poisson** — un calcul maison qui déduit la probabilité de chaque marché
    d'une matrice de scores exacts (voir [Le modèle](#le-modèle-poisson)).
 4. **Unibet** — les cotes réellement proposées : 1 N 2 du listing, puis « les deux
@@ -90,6 +92,42 @@ modèle s'écartant du marché par construction, trier ses sélections par valeu
 reviendrait à choisir celles où il se trompe le plus. Dans les deux cas, une seule
 sélection par match, aucune cote en dessous de 1.20, et la mise conseillée est un quart
 du critère de Kelly plafonné à 5 % du capital.
+
+### Forebet décide sur ses marchés, à partir de 60 %
+
+Sur les cinq marchés que Forebet publie lui-même — « les deux marquent » oui et non, et
+les trois doubles chances `1N`, `N2`, `12` — c'est **sa probabilité qui sert à composer
+les combinés**, et non celle du modèle : elle repose sur un historique bien plus large
+que cinq matchs de forme. Le seuil est de **60 %** ; en dessous, la sélection est
+écartée même si le modèle la juge très probable. Le rapport affiche la source de chaque
+sélection (`Forebet` ou `modele`) dans le tableau du ticket. Le modèle de Poisson reste
+inchangé : il continue de calculer et d'afficher tous ses marchés, et il reste seul sur
+ceux que Forebet ne publie pas.
+
+### Matchs pièges
+
+Une probabilité élevée ne dit rien de la **fragilité** d'une rencontre. Bet.Bot écarte
+des combinés les sélections que le contexte contredit, et explique pourquoi dans une
+section « Matchs pièges » sous chaque match :
+
+| Signal | Ce qu'il écarte |
+| --- | --- |
+| Score pronostiqué par Forebet à 0-0, 1-0 ou 0-1 | « les deux marquent : oui », `12` |
+| Deux défenses à moins de 1.0 but encaissé par match (classement de la saison) | « les deux marquent : oui » |
+| Confrontations directes à moins de 2 buts par match | « les deux marquent : oui » |
+| Classement serré (3 places ou moins) | « les deux marquent : oui », `12` |
+| Une défense à 1.7 but encaissé et plus | « les deux marquent : non » |
+| Confrontations directes à plus de 3 buts | « les deux marquent : non » |
+| Beaucoup de nuls (30 % et plus, au classement ou en face à face) | `12` |
+| Adversaire mieux classé de 8 places et plus | `1N` ou `N2` du moins bien classé |
+| Défense friable (1.7+) face à une attaque à 1.6 but et plus | `1N` ou `N2` |
+
+Ce sont des **heuristiques**, pas une mesure : « tension » et « solidité défensive » sont
+approchées par des chiffres (position, buts encaissés, part de nuls, buts en face à
+face), rien de plus. Un match signalé n'annonce pas l'issue contraire, il dit que la
+sélection est moins sûre que sa probabilité ne le laisse croire. Et quand il ne reste pas
+assez de sélections valables, **aucun ticket n'est produit** : c'est un résultat
+acceptable, pas une panne.
 
 ### Ce que ça ne prouve pas
 

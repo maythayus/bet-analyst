@@ -19,6 +19,7 @@ from betbot.combo import (
 )
 from betbot.models import Analysis, MatchBundle, implied_from_odds
 from betbot.poisson import SOURCE_FORM, SOURCE_FORM_ONLY
+from betbot.trap import TRAP_MARKETS, predicted_closed_game, trap_reasons
 
 DISCLAIMER = (
     "> Rapport genere automatiquement a partir de Forebet, Flashscore, d'un modele de "
@@ -213,18 +214,57 @@ def _forebet_markets_block(bundle: MatchBundle) -> str:
 def _form_block(bundle: MatchBundle) -> str:
     stats = bundle.stats
     lines = []
-    for form in (stats.home_form, stats.away_form):
+    for form, table in ((stats.home_form, stats.home_table), (stats.away_form, stats.away_table)):
         if not form:
             continue
+        rank = ""
+        if table:
+            conceded = table.conceded_per_game
+            rank = (
+                f" | {table.position}e du classement ({table.points} pts, "
+                f"{conceded:.2f} be/match sur la saison)"
+                if conceded is not None
+                else f" | {table.position}e du classement ({table.points} pts)"
+            )
         lines.append(
             f"- **{form.name}** : forme {''.join(form.last_results) or '?'} | "
             f"{form.avg_goals_for:.2f} bm/match | {form.avg_goals_against:.2f} be/match | "
-            f"{form.points_per_game:.2f} pts/match"
+            f"{form.points_per_game:.2f} pts/match{rank}"
         )
     if stats.head_to_head:
         lines.append("- **Confrontations directes** :")
         lines.extend(f"  - {line}" for line in stats.head_to_head)
     return "\n".join(lines) if lines else "_Statistiques Flashscore indisponibles._"
+
+
+def _traps_block(bundle: MatchBundle) -> str:
+    """Marches ecartes des combines parce que la rencontre les rend fragiles.
+
+    Le modele et Forebet continuent d'afficher leurs probabilites : ce bloc dit seulement
+    pourquoi Bet.Bot refuse de batir un combine dessus.
+    """
+    lines = []
+    for market in TRAP_MARKETS:
+        reasons = trap_reasons(bundle.stats, market, bundle.predicted_score)
+        if reasons:
+            lines.append(f"- **{market}** : {', '.join(reasons)}")
+    if not lines:
+        return ""
+    if predicted_closed_game(bundle.predicted_score):
+        lines.append(
+            f"- **Rencontre annoncee fermee** : Forebet pronostique "
+            f"{bundle.predicted_score} — un but decide le match."
+        )
+    return "\n".join(
+        [
+            "Marches ecartes des combines, la rencontre les rendant fragiles :",
+            "",
+            *lines,
+            "",
+            "_Un piege signale n'annonce pas l'issue contraire : il dit que la selection "
+            "est moins sure que sa probabilite ne le laisse croire._",
+        ]
+    )
 
 
 def _selection_block(bundles: list[MatchBundle]) -> str:
@@ -287,14 +327,14 @@ def _selection_block(bundles: list[MatchBundle]) -> str:
 
 def _ticket_block(ticket: Ticket, stake: float = 10.0) -> str:
     rows = [
-        "| Coup d'envoi | Match | Marche | Proba modele | Cote equitable | Cote dispo |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Coup d'envoi | Match | Marche | Proba | Source | Cote equitable | Cote dispo |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for leg in ticket.legs:
         odds = f"{leg.odds:.2f}" if leg.odds else "-"
         rows.append(
             f"| {leg.kickoff or '?'} | {leg.match} | {leg.market} | {leg.probability:.1f} % | "
-            f"{leg.fair_odds:.2f} | {odds} |"
+            f"{leg.source} | {leg.fair_odds:.2f} | {odds} |"
         )
 
     deadline = ticket.deadline
@@ -358,7 +398,8 @@ def _ticket_to_dict(ticket: Ticket, stake: float = 10.0) -> dict:
                 "coup_denvoi": leg.kickoff,
                 "match": leg.match,
                 "marche": leg.market,
-                "probabilite_modele": leg.probability,
+                "probabilite": leg.probability,
+                "source_probabilite": leg.source,
                 "cote_equitable": leg.fair_odds,
                 "cote_disponible": leg.odds,
             }
@@ -430,6 +471,9 @@ def build_markdown(
         forebet_block = _forebet_markets_block(bundle)
         if forebet_block:
             parts += ["### Marches (pages Forebet)", forebet_block, ""]
+        traps_block = _traps_block(bundle)
+        if traps_block:
+            parts += ["### Matchs pieges", traps_block, ""]
         if analysis:
             parts += [f"### Analyse LLM ({analysis.model})", analysis.markdown, ""]
         else:

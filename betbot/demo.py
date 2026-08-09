@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from betbot.models import ForebetPrediction, MatchStats, TeamForm
+from betbot.models import ForebetPrediction, MatchStats, TableStanding, TeamForm
 
 _FIXTURES: list[tuple[MatchStats, ForebetPrediction]] = [
     (
@@ -30,8 +30,26 @@ _FIXTURES: list[tuple[MatchStats, ForebetPrediction]] = [
                 "2025-10-19 Olympique Lyonnais 3-1 Stade Rennais",
                 "2025-04-06 Stade Rennais 2-2 Olympique Lyonnais",
             ],
-            home_table_position=4,
-            away_table_position=9,
+            home_table=TableStanding(
+                name="Olympique Lyonnais",
+                position=4,
+                played=30,
+                wins=15,
+                draws=8,
+                goals_for=48,
+                goals_against=33,
+                points=53,
+            ),
+            away_table=TableStanding(
+                name="Stade Rennais",
+                position=9,
+                played=30,
+                wins=11,
+                draws=9,
+                goals_for=39,
+                goals_against=40,
+                points=42,
+            ),
         ),
         ForebetPrediction(
             home_team="Olympique Lyonnais",
@@ -70,8 +88,26 @@ _FIXTURES: list[tuple[MatchStats, ForebetPrediction]] = [
                 "2026-02-15 Athletic Bilbao 2-0 Getafe",
                 "2025-09-28 Getafe 0-0 Athletic Bilbao",
             ],
-            home_table_position=14,
-            away_table_position=3,
+            home_table=TableStanding(
+                name="Getafe",
+                position=14,
+                played=30,
+                wins=8,
+                draws=10,
+                goals_for=27,
+                goals_against=38,
+                points=34,
+            ),
+            away_table=TableStanding(
+                name="Athletic Bilbao",
+                position=3,
+                played=30,
+                wins=17,
+                draws=7,
+                goals_for=52,
+                goals_against=24,
+                points=58,
+            ),
         ),
         ForebetPrediction(
             home_team="Getafe",

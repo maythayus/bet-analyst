@@ -88,6 +88,37 @@ def implied_from_odds(odds: dict[str, float]) -> dict[str, float] | None:
 
 
 @dataclass
+class TableStanding:
+    """Ligne de classement d'une equipe, lue sur Flashscore.
+
+    Porte sur toute la saison, contrairement a `TeamForm` qui ne regarde que les cinq
+    derniers matchs : c'est la mesure la plus stable de la solidite d'une defense.
+    """
+
+    name: str
+    position: int
+    played: int = 0
+    wins: int = 0
+    draws: int = 0
+    goals_for: int = 0
+    goals_against: int = 0
+    points: int = 0
+
+    @property
+    def conceded_per_game(self) -> float | None:
+        return self.goals_against / self.played if self.played else None
+
+    @property
+    def scored_per_game(self) -> float | None:
+        return self.goals_for / self.played if self.played else None
+
+    @property
+    def draw_share(self) -> float | None:
+        """Part de matchs nuls, en fraction de 1."""
+        return self.draws / self.played if self.played else None
+
+
+@dataclass
 class MatchStats:
     """Statistiques brutes d'une rencontre collectees sur Flashscore."""
 
@@ -100,9 +131,16 @@ class MatchStats:
     home_form: TeamForm | None = None
     away_form: TeamForm | None = None
     head_to_head: list[str] = field(default_factory=list)
-    home_table_position: int | None = None
-    away_table_position: int | None = None
+    home_table: TableStanding | None = None
+    away_table: TableStanding | None = None
     url: str | None = None
+
+    @property
+    def table_gap(self) -> int | None:
+        """Nombre de places separant les deux equipes au classement."""
+        if not self.home_table or not self.away_table:
+            return None
+        return abs(self.home_table.position - self.away_table.position)
 
 
 @dataclass
@@ -150,6 +188,11 @@ class MatchBundle:
     @property
     def label(self) -> str:
         return f"{self.stats.home_team} vs {self.stats.away_team}"
+
+    @property
+    def predicted_score(self) -> str | None:
+        """Score pronostique par Forebet, quand sa page en publie un."""
+        return self.forebet.predicted_score if self.forebet else None
 
     def best_odds(self) -> dict[str, float]:
         """Meilleure cote disponible pour chaque signe, tous bookmakers confondus."""
