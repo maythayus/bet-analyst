@@ -45,11 +45,15 @@ Donnees (JSON) :
 ```
 
 Rappels : les probabilites Forebet sont en %, celles du modele de Poisson aussi.
-Les moyennes de buts portent sur les 5 derniers matchs disponibles.
-`poisson.markets` donne la probabilite de chaque marche combine ; `bookmakers` et
-`best_odds` donnent les cotes reellement disponibles ; `value_gap_poisson_vs_market`
-donne l'ecart en points entre le modele et le marche pour 1, X et 2.
+`flashscore.*.recent_matches` ne montre que les derniers matchs, alors que le modele en a
+utilise davantage : ne conclus pas d'une absence dans cette liste. `poisson.markets`
+donne la probabilite de chaque marche combine ; `best_odds` et `market_odds` donnent les
+cotes reellement disponibles ; `value_gap_poisson_vs_market` donne l'ecart en points
+entre le modele et le marche pour 1, X et 2.
 """
+
+# Message du serveur local quand le prompt depasse la fenetre du modele charge.
+_CONTEXT_MARKERS = ("context size", "context length", "n_ctx")
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
@@ -96,11 +100,31 @@ class LMStudioClient:
             )
             response.raise_for_status()
         except requests.RequestException as exc:
-            raise LMStudioError(f"Echec de l'appel a LM Studio : {exc}") from exc
+            raise LMStudioError(self._failure(exc)) from exc
         return response.json()["choices"][0]["message"]["content"]
 
+    def _failure(self, exc: requests.RequestException) -> str:
+        """Message d'echec, en distinguant la fenetre de contexte du reste.
+
+        Un contexte trop court fait rejeter la rencontre entiere : le rapport sort alors
+        sans commentaire, sans que rien n'explique pourquoi.
+        """
+        body = exc.response.text.lower() if exc.response is not None else ""
+        if any(marker in body for marker in _CONTEXT_MARKERS):
+            return (
+                "LM Studio a refuse l'analyse : le prompt depasse la fenetre de contexte "
+                "du modele charge. Augmente « Context Length » dans LM Studio (16384 "
+                "suffit largement) puis recharge le modele."
+            )
+        return f"Echec de l'appel a LM Studio : {exc}"
+
     def analyse(self, bundle: MatchBundle) -> Analysis:
-        payload = json.dumps(bundle.to_dict(), ensure_ascii=False, indent=2, default=str)
+        payload = json.dumps(
+            bundle.to_prompt_dict(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
         raw = self.chat(SYSTEM_PROMPT, USER_TEMPLATE.format(payload=payload))
         cleaned = _THINK_BLOCK.sub("", raw).strip()
         log.info("Analyse LLM terminee pour %s", bundle.label)

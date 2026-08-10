@@ -199,6 +199,31 @@ class BookmakerLine:
         return implied_from_odds(self.odds)
 
 
+# Ce que le prompt du LLM garde de la forme et des confrontations directes. Le modele,
+# lui, continue de travailler sur la totalite.
+PROMPT_MATCHES = 6
+PROMPT_HEAD_TO_HEAD = 5
+
+
+def _form_summary(form: TeamForm | None) -> dict[str, Any] | None:
+    """Forme d'une equipe en quelques lignes plutot qu'en vingt objets."""
+    if form is None:
+        return None
+    recent = [
+        f"{played.date} {'dom' if played.at_home else 'ext'} vs {played.opponent} "
+        f"{played.scored}-{played.conceded}"
+        for played in form.matches[:PROMPT_MATCHES]
+    ]
+    return {
+        "name": form.name,
+        "last_results": form.last_results,
+        "matches_played": form.matches_played,
+        "avg_goals_for": round(form.avg_goals_for, 2),
+        "avg_goals_against": round(form.avg_goals_against, 2),
+        "recent_matches": recent,
+    }
+
+
 @dataclass
 class MatchBundle:
     """Tout ce que l'on sait d'un match, pret a etre envoye au LLM."""
@@ -273,6 +298,45 @@ class MatchBundle:
             "2": self.poisson.prob_away,
         }
         return {sign: round(model[sign] - implied[sign], 2) for sign in ("1", "X", "2")}
+
+    def to_prompt_dict(self) -> dict[str, Any]:
+        """Version resserree de `to_dict()`, destinee au LLM.
+
+        Le classement complet de la competition et le detail des vingt matchs servent au
+        modele, pas au commentaire : les envoyer depassait la fenetre de contexte, et le
+        serveur refusait alors la rencontre entiere. Ne restent que les elements dont le
+        commentaire a besoin, les chiffres eux-memes etant deja calcules.
+        """
+        return {
+            "match": self.label,
+            "kickoff": self.stats.kickoff,
+            "competition": self.stats.competition,
+            "country": self.stats.country,
+            "flashscore": {
+                "home_form": _form_summary(self.stats.home_form),
+                "away_form": _form_summary(self.stats.away_form),
+                "home_table": asdict(self.stats.home_table) if self.stats.home_table else None,
+                "away_table": asdict(self.stats.away_table) if self.stats.away_table else None,
+                "head_to_head": self.stats.head_to_head[:PROMPT_HEAD_TO_HEAD],
+            },
+            "forebet": (
+                {
+                    "prob_home": self.forebet.prob_home,
+                    "prob_draw": self.forebet.prob_draw,
+                    "prob_away": self.forebet.prob_away,
+                    "predicted_score": self.forebet.predicted_score,
+                    "avg_goals": self.forebet.avg_goals,
+                    "markets": self.forebet.markets,
+                }
+                if self.forebet
+                else None
+            ),
+            "poisson": asdict(self.poisson) if self.poisson else None,
+            "best_odds": self.best_odds() or None,
+            "market_odds": self.market_prices() or None,
+            "implied_from_best_odds": implied_from_odds(self.best_odds()),
+            "value_gap_poisson_vs_market": self.value_gap(),
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {

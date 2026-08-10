@@ -362,6 +362,13 @@ Un serveur local n'exige aucune clé. S'il en demande une (serveur distant, LM S
 exposé sur le réseau), passe-la par `--api-key` ou par la variable `LMSTUDIO_API_KEY` :
 ne l'écris jamais dans le dépôt.
 
+Le point 2 n'est pas un détail : avec les **8192 tokens** par défaut, le serveur refuse
+la rencontre (`request (8300 tokens) exceeds the available context size`) et le rapport
+sort **sans commentaire pour ce match**, sans autre trace que le journal de LM Studio.
+Bet.Bot n'envoie plus au modèle que ce dont le commentaire a besoin — le classement de
+la compétition et le détail des vingt matchs restent côté modèle de Poisson, qui les
+utilise pleinement — mais un contexte de 16384 reste la marge saine.
+
 ```powershell
 $env:LMSTUDIO_API_KEY = "<ta-cle>"
 $env:LMSTUDIO_BASE_URL = "http://<hote>:1234/v1"   # si le serveur n'est pas local

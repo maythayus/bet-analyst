@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,8 @@ from math import exp, factorial
 from pathlib import Path
 from typing import ClassVar
 from unittest import mock
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -28,8 +31,17 @@ from betbot.combo import (
     build_value_ticket,
     kelly_share,
 )
-from betbot.config import AppConfig, MailConfig, ScrapeConfig, WordPressConfig
+from betbot.config import (
+    AppConfig,
+    LMStudioConfig,
+    MailConfig,
+    ScrapeConfig,
+    WordPressConfig,
+)
+from betbot.llm import LMStudioClient, LMStudioError
 from betbot.models import (
+    PROMPT_HEAD_TO_HEAD,
+    PROMPT_MATCHES,
     BookmakerLine,
     ForebetPrediction,
     MatchBundle,
@@ -274,6 +286,82 @@ class TestForebetPages(unittest.TestCase):
         page.content.return_value = "<html></html>"
         with self.assertRaises(ForebetSaveError):
             _wait_for_human(page, headless=True)
+
+
+class TestLLMPrompt(unittest.TestCase):
+    """Ce qui part au modele local doit tenir dans sa fenetre de contexte."""
+
+    def _bundle(self) -> MatchBundle:
+        form = TeamForm(
+            name="Lyon",
+            last_results=["W", "D", "L", "W", "W"],
+            goals_for=9,
+            goals_against=5,
+            matches_played=20,
+            matches=[
+                PlayedMatch(
+                    opponent=f"Adversaire {index}",
+                    scored=index % 3,
+                    conceded=(index + 1) % 3,
+                    at_home=bool(index % 2),
+                    date=f"2026-01-{index + 1:02d}",
+                )
+                for index in range(20)
+            ],
+        )
+        stats = MatchStats(
+            home_team="Lyon",
+            away_team="Rennes",
+            home_form=form,
+            away_form=replace(form, name="Rennes"),
+            head_to_head=[f"2025-0{index + 1}-01 Lyon 2-1 Rennes" for index in range(9)],
+            standings=[
+                TableStanding(
+                    name=f"Club {index}",
+                    position=index + 1,
+                    played=30,
+                    wins=15 - index // 2,
+                    goals_for=48 - index,
+                    goals_against=33 + index,
+                    points=53 - 2 * index,
+                )
+                for index in range(20)
+            ],
+        )
+        return MatchBundle(stats=stats)
+
+    def test_the_prompt_drops_what_only_the_model_needs(self) -> None:
+        bundle = self._bundle()
+        prompt = bundle.to_prompt_dict()
+        home = prompt["flashscore"]["home_form"]
+        assert home is not None
+        self.assertEqual(len(home["recent_matches"]), PROMPT_MATCHES)
+        self.assertEqual(len(prompt["flashscore"]["head_to_head"]), PROMPT_HEAD_TO_HEAD)
+        # Le classement complet sert au modele, pas au commentaire.
+        self.assertNotIn("standings", prompt["flashscore"])
+        # Les moyennes restent, elles portent sur les vingt matchs.
+        self.assertEqual(home["matches_played"], 20)
+
+    def test_the_prompt_is_far_shorter_than_the_full_bundle(self) -> None:
+        bundle = self._bundle()
+        full = json.dumps(bundle.to_dict(), ensure_ascii=False, indent=2, default=str)
+        short = json.dumps(bundle.to_prompt_dict(), ensure_ascii=False, default=str)
+        self.assertLess(len(short), len(full) / 2)
+
+    def test_a_context_overflow_says_what_to_change(self) -> None:
+        """Sans ce message, le rapport sort sans commentaire et rien ne l'explique."""
+        client = LMStudioClient(LMStudioConfig())
+        response = mock.Mock()
+        response.text = (
+            "request (8300 tokens) exceeds the available context size (8192 tokens)"
+        )
+        error = requests.HTTPError("400 Client Error", response=response)
+        with (
+            mock.patch.object(client.session, "post", side_effect=error),
+            self.assertRaises(LMStudioError) as raised,
+        ):
+            client.chat("systeme", "utilisateur")
+        self.assertIn("Context Length", str(raised.exception))
 
 
 class TestShare(unittest.TestCase):
