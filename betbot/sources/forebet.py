@@ -24,8 +24,12 @@ _NUMBER = re.compile(r"-?\d+(?:[.,]\d+)?")
 
 
 def _fold(text: str) -> str:
-    """Minuscules sans accents : « Mi-Temps » et « mi-temps » se comparent pareil."""
-    decomposed = unicodedata.normalize("NFKD", text.lower())
+    """Minuscules sans accents ni apostrophe typographique, pour comparer des titres.
+
+    « Mi-Temps » et « mi-temps » se comparent pareil, et « aujourd'hui » se compare de
+    la meme facon que « aujourd\u2019hui » : Forebet ecrit l'apostrophe courbe.
+    """
+    decomposed = unicodedata.normalize("NFKD", text.lower().replace("\u2019", "'"))
     return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
@@ -148,7 +152,18 @@ _PAGE_TITLES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("double chance", ("double chance", "chance double")),
     ("half time", ("half time", "mi-temps", "mi temps")),
-    ("1x2", ("1x2",)),
+    # Le listing principal ne dit pas « 1X2 » : il s'intitule « Pronostics de football
+    # pour aujourd'hui », son equivalent anglais « Football predictions for today ».
+    (
+        "1x2",
+        (
+            "1x2",
+            "pronostics de football pour aujourd'hui",
+            "pronostics pour aujourd'hui",
+            "football predictions for today",
+            "predictions for today",
+        ),
+    ),
 )
 
 
@@ -207,10 +222,13 @@ def parse_market_page(html: str | bytes) -> tuple[str, list[ForebetPrediction]]:
     """
     page = market_page_kind(html)
     if page is None:
+        soup = BeautifulSoup(html, "html.parser")
+        found = soup.title.get_text(" ", strip=True) if soup.title else "(sans titre)"
         raise FetchError(
-            "Page Forebet non reconnue : attendu une page « 1X2 », « Chaque equipe "
-            "marque », « Moins/Plus 2.5 de buts », « Chance double » ou « Mi-temps » "
-            "(leurs equivalents anglais sont lus aussi)."
+            f"Page Forebet non reconnue (titre lu : « {found} ») : attendu une page "
+            "« Pronostics de football pour aujourd'hui », « Chaque equipe marque », "
+            "« Moins/Plus 2.5 de buts », « Chance double » ou « Mi-temps » (leurs "
+            "equivalents anglais sont lus aussi)."
         )
 
     soup = BeautifulSoup(html, "html.parser")

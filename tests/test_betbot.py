@@ -205,9 +205,25 @@ class TestForebetMarketPages(unittest.TestCase):
         self.assertEqual(page, "half time")
         self.assertEqual(half.markets["N (1re mi-temps)"], 42.0)
 
+    def test_the_listing_is_recognised_by_its_real_title(self) -> None:
+        """Le listing 1X2 ne dit pas « 1X2 » : Forebet l'intitule « Pronostics de
+        football pour aujourd'hui », avec une apostrophe courbe."""
+        page, (prediction,) = parse_market_page(
+            _market_page(
+                "Pronostics de football pour aujourd\u2019hui | Forebet Pronostics",
+                "1",
+                "52",
+                columns="<span>52</span><span>27</span><span>21</span>",
+            )
+        )
+        self.assertEqual(page, "1x2")
+        self.assertEqual(prediction.markets, {"1": 52.0, "N": 27.0, "2": 21.0})
+
     def test_rejects_an_unrelated_page(self) -> None:
-        with self.assertRaises(FetchError):
+        with self.assertRaises(FetchError) as raised:
             parse_market_page("<html><head><title>Forebet</title></head></html>")
+        # Le titre lu est cite : sans lui, impossible de savoir quoi ajouter.
+        self.assertIn("Forebet", str(raised.exception))
 
 
 class TestDiscoverMarketPages(unittest.TestCase):
