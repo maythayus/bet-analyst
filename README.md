@@ -207,6 +207,7 @@ section « Matchs pièges » sous chaque match :
 | --- | --- |
 | Score pronostiqué par Forebet à 0-0, 1-0 ou 0-1 | « les deux marquent : oui », `12` |
 | Deux défenses à moins de 1.0 but encaissé par match (classement de la saison) | « les deux marquent : oui » |
+| Une attaque à moins de 1.2 but marqué par match | « les deux marquent : oui » |
 | Confrontations directes à moins de 2 buts par match | « les deux marquent : oui » |
 | Classement serré (3 places ou moins) | « les deux marquent : oui », `12` |
 | Une défense à 1.7 but encaissé et plus | « les deux marquent : non » |

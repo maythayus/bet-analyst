@@ -38,6 +38,11 @@ SOLID_DEFENCE = 1.0
 LEAKY_DEFENCE = 1.7
 # Attaque assez fournie pour punir une defense friable.
 SHARP_ATTACK = 1.6
+# Buts marques par match en dessous desquels une attaque ne suffit pas a porter un
+# « les deux marquent : oui » : ce marche exige que les DEUX equipes marquent, c'est
+# donc la moins prolifique qui commande. A 1.2 but par match, une equipe reste muette
+# environ une rencontre sur trois ; en dessous, c'est davantage.
+PROLIFIC_ATTACK = 1.2
 # Places de classement : voisins (rencontre tendue) ou eloignes (favori attendu).
 TIGHT_TABLE_GAP = 3
 WIDE_TABLE_GAP = 8
@@ -132,6 +137,13 @@ def _btts_yes_reasons(
     reasons = []
     if predicted_closed_game(predicted_score):
         reasons.append(f"score pronostique ferme ({predicted_score.strip()})")
+    attacks = (
+        scored_per_game(stats.home_table, stats.home_form),
+        scored_per_game(stats.away_table, stats.away_form),
+    )
+    for name, attack in zip((stats.home_team, stats.away_team), attacks, strict=True):
+        if attack is not None and attack < PROLIFIC_ATTACK:
+            reasons.append(f"attaque de {name} trop tendre ({attack:.1f} but marque par match)")
     home_defence, away_defence = defences
     if (
         home_defence is not None

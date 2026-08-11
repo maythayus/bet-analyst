@@ -1438,10 +1438,10 @@ class TestTraps(unittest.TestCase):
             home_team="Recevant",
             away_team="Visiteur",
             home_table=TableStanding(
-                name="Recevant", position=5, played=20, draws=4, goals_against=25
+                name="Recevant", position=5, played=20, draws=4, goals_for=30, goals_against=25
             ),
             away_table=TableStanding(
-                name="Visiteur", position=12, played=20, draws=4, goals_against=25
+                name="Visiteur", position=12, played=20, draws=4, goals_for=30, goals_against=25
             ),
         )
         return replace(base, **changes)
@@ -1453,6 +1453,20 @@ class TestTraps(unittest.TestCase):
         )
         self.assertTrue(trap.is_trap(stats, BTTS_YES))
         self.assertFalse(trap.is_trap(stats, BTTS_NO))
+
+    def test_both_teams_to_score_demands_two_real_attacks(self) -> None:
+        """Le marche exige que les DEUX equipes marquent : la moins prolifique commande."""
+        stats = self._stats(
+            away_table=TableStanding(
+                name="Visiteur", position=12, played=20, goals_for=16, goals_against=25
+            )
+        )
+        reasons = trap.trap_reasons(stats, BTTS_YES)
+        self.assertTrue(any("attaque de Visiteur" in reason for reason in reasons), reasons)
+        # L'attaque du recevant, elle, tient le marche.
+        self.assertFalse(any("attaque de Recevant" in reason for reason in reasons), reasons)
+        # Deux attaques fournies ne declenchent rien.
+        self.assertEqual(trap.trap_reasons(self._stats(), BTTS_YES), [])
 
     def test_a_leaky_defence_condemns_the_clean_sheet(self) -> None:
         stats = self._stats(
