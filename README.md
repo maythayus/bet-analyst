@@ -542,6 +542,23 @@ elles sont toutes analysées (compte plusieurs minutes, Flashscore ouvre deux pa
 match). Lancé tard le soir, quand les matchs du jour sont joués, il bascule
 automatiquement sur la prochaine journée cotée et l'indique dans les logs.
 
+### Quelles rencontres passent quand il y en a trop
+
+`--matches N` ne prend plus les N premières du listing : les rencontres sont d'abord
+classées (`betbot/priority.py`), puis coupées au plafond.
+
+| Critère | Ordre |
+| --- | --- |
+| **Compétition** | grandes divisions et Ligue des champions d'abord, puis les autres compétitions connues (C3, C4, Eredivisie, Championship, coupes nationales…), puis le reste |
+| **Buts attendus** | à compétition équivalente, la moyenne de buts publiée par Forebet décide ; sans elle, sa probabilité de plus de 2.5 buts |
+
+Le premier critère est la seule façon honnête d'approcher les « équipes connues » : un
+club l'est parce qu'il joue dans une grande division, et ce sont aussi les compétitions
+où Flashscore publie un classement complet, donc celles où le modèle est le mieux nourri.
+Ce classement décide de **ce qui est analysé**, pas de ce qui est joué : les seuils, les
+matchs pièges et les cotes tranchent ensuite comme avant. À égalité, l'ordre de la source
+est conservé, donc deux analyses de la même journée retiennent les mêmes rencontres.
+
 Les noms d'équipes du bookmaker sont abrégés (« Mac.Tel Aviv », « SherifTiraspol »,
 « Universit Cluj ») : la recherche Flashscore les déplie, écarte les joueurs, les
 équipes féminines, les réserves et les U19, et se sert du pays de la compétition pour

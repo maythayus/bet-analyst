@@ -17,7 +17,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from betbot import consensus, demo, poisson, strength, tracking, trap
+from betbot import consensus, demo, poisson, priority, strength, tracking, trap
 from betbot.cli import discover_market_pages, open_report
 from betbot.combo import (
     BTTS_NO,
@@ -1428,6 +1428,52 @@ class TestTracking(unittest.TestCase):
 
     def test_nothing_settled_says_so(self) -> None:
         self.assertIn("Aucun pronostic regle", tracking.markdown([self._prediction()]))
+
+
+class TestPriority(unittest.TestCase):
+    """Choix des rencontres quand la journee depasse le plafond."""
+
+    def _fixture(
+        self, home: str, competition: str, goals: float | None = None
+    ) -> ForebetPrediction:
+        return ForebetPrediction(
+            home_team=home, away_team="Adversaire", competition=competition, avg_goals=goals
+        )
+
+    def test_a_known_competition_passes_before_an_obscure_one(self) -> None:
+        obscure = self._fixture("Inconnu", "Islande - 3e division", goals=4.0)
+        major = self._fixture("Arsenal", "Angleterre - Premier League", goals=2.4)
+        kept = priority.prioritise([obscure, major], 1)
+        self.assertEqual([item.home_team for item in kept], ["Arsenal"])
+
+    def test_within_a_tier_the_goals_decide(self) -> None:
+        tight = self._fixture("Getafe", "Espagne - LaLiga", goals=1.9)
+        open_game = self._fixture("Bayern", "Allemagne - Bundesliga", goals=3.6)
+        kept = priority.prioritise([tight, open_game])
+        self.assertEqual([item.home_team for item in kept], ["Bayern", "Getafe"])
+
+    def test_over_25_replaces_a_missing_average(self) -> None:
+        """Les pages par marche donnent le plus/moins 2.5 sans moyenne de buts."""
+        prolific = self._fixture("A", "Angleterre - Premier League")
+        prolific.markets["Plus de 2.5 buts"] = 75.0
+        closed = self._fixture("B", "Angleterre - Premier League")
+        closed.markets["Plus de 2.5 buts"] = 35.0
+        self.assertGreater(priority.expected_goals(prolific), priority.expected_goals(closed))
+        self.assertEqual(
+            [item.home_team for item in priority.prioritise([closed, prolific])], ["A", "B"]
+        )
+
+    def test_an_unknown_competition_is_not_penalised_on_goals(self) -> None:
+        """Sans moyenne publiee, la rencontre n'est ni avantagee ni ecartee."""
+        self.assertIsNone(priority.expected_goals(self._fixture("A", "Coupe locale")))
+        self.assertEqual(priority.competition_tier(None), priority.UNKNOWN_TIER)
+
+    def test_the_order_of_the_source_breaks_ties(self) -> None:
+        first = self._fixture("A", "France - Ligue 1", goals=2.5)
+        second = self._fixture("B", "France - Ligue 1", goals=2.5)
+        self.assertEqual(
+            [item.home_team for item in priority.prioritise([first, second])], ["A", "B"]
+        )
 
 
 class TestTraps(unittest.TestCase):

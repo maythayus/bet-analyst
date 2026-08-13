@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from betbot import demo, poisson
+from betbot import demo, poisson, priority
 from betbot.config import AppConfig
 from betbot.llm import LMStudioClient, LMStudioError
 from betbot.models import (
@@ -65,7 +65,9 @@ def collect_odds(
     return entries
 
 
-def predictions_from_odds(entries: list[BookmakerOdds], limit: int) -> list[ForebetPrediction]:
+def predictions_from_odds(
+    entries: list[BookmakerOdds], limit: int | None = None
+) -> list[ForebetPrediction]:
     """Rencontres a analyser deduites des grilles bookmakers, sans passer par Forebet.
 
     Utile quand la page Forebet enregistree ne recoupe pas la fenetre couverte par le
@@ -87,9 +89,7 @@ def predictions_from_odds(entries: list[BookmakerOdds], limit: int) -> list[Fore
                 competition=entry.competition,
             )
         )
-        if len(predictions) >= limit:
-            break
-    return predictions
+    return priority.prioritise(predictions, limit)
 
 
 def enrich_with_detailed_markets(
@@ -286,8 +286,8 @@ def run(
     elif offline:
         predictions = demo.predictions()
     elif from_bookmakers:
-        predictions = predictions_from_odds(odds, cfg.scrape.max_matches)
-        log.info("%d rencontres cotees a analyser", len(predictions))
+        predictions = predictions_from_odds(odds)
+        log.info("%d rencontres cotees", len(predictions))
     else:
         predictions = forebet.fetch_predictions(
             cfg.scrape, use_cache=use_cache, html_file=forebet_html
@@ -298,6 +298,18 @@ def run(
 
     if forebet_market_html:
         merge_forebet_markets(predictions, forebet.read_market_pages(forebet_market_html))
+
+    if not matches and not offline:
+        # Le plafond coupe apres le tri par interet, pas dans l'ordre du listing, et une
+        # fois Forebet lu : sa moyenne de buts est l'un des deux criteres.
+        before = len(predictions)
+        predictions = priority.prioritise(predictions, cfg.scrape.max_matches)
+        if len(predictions) < before:
+            log.info(
+                "%d rencontres retenues sur %d (competitions connues et buts attendus)",
+                len(predictions),
+                before,
+            )
 
     if odds:
         before = len(predictions)
