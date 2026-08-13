@@ -261,8 +261,14 @@ def parse_market_page(html: str | bytes) -> tuple[str, list[ForebetPrediction]]:
 
 
 def read_market_pages(paths: list[Path]) -> list[ForebetPrediction]:
-    """Fusionne plusieurs pages Forebet specialisees, une entree par rencontre."""
+    """Fusionne plusieurs pages Forebet specialisees, une entree par rencontre.
+
+    Une page inconnue est signalee et sautee, pas fatale : les fichiers sont ramasses
+    automatiquement dans le dossier, et un HTML etranger ne doit pas priver l'analyse des
+    quatre autres marches. Si aucune n'est lisible, l'erreur remonte.
+    """
     merged: dict[tuple[str, str], ForebetPrediction] = {}
+    unreadable: list[str] = []
     for path in paths:
         if not path.is_file():
             raise FetchError(
@@ -271,7 +277,13 @@ def read_market_pages(paths: list[Path]) -> list[ForebetPrediction]:
             )
         # Les pages enregistrees depuis un navigateur ne sont pas toujours en UTF-8 :
         # BeautifulSoup deduit l'encodage du meta charset quand on lui passe les octets.
-        _, predictions = parse_market_page(path.read_bytes())
+        try:
+            page, predictions = parse_market_page(path.read_bytes())
+        except FetchError as exc:
+            log.warning("%s ignore : %s", path.name, exc)
+            unreadable.append(path.name)
+            continue
+        log.info("%s : page %s", path.name, page)
         for prediction in predictions:
             key = (prediction.home_team, prediction.away_team)
             existing = merged.get(key)
@@ -280,6 +292,12 @@ def read_market_pages(paths: list[Path]) -> list[ForebetPrediction]:
             else:
                 existing.markets.update(prediction.markets)
                 copy_forecast(prediction, existing)
+    if not merged and unreadable:
+        raise FetchError(
+            "Aucune page Forebet lisible parmi : " + ", ".join(unreadable) + ". "
+            "Reenregistre les pages depuis les URLs francaises "
+            "(https://www.forebet.com/fr/pronostics-pour-aujourd-hui et ses marches)."
+        )
     return list(merged.values())
 
 

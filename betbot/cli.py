@@ -343,14 +343,16 @@ def save_forebet_pages(cfg: AppConfig, *, headless: bool) -> list[Path]:
 def discover_market_pages() -> list[Path]:
     """Pages Forebet par marche posees a cote de l'executable ou dans le dossier courant.
 
-    Evite d'avoir a taper quatre chemins : les fichiers enregistres par le navigateur
-    s'appellent « Pronostics Chaque equipe marque _ Forebet Football.htm » et derives.
-    Les anciens noms anglais « Predictions... » restent ramasses.
+    Evite d'avoir a taper quatre chemins. Le nom depend de qui enregistre : Bet.Bot ecrit
+    « Pronostics Chaque equipe marque _ Forebet Football.htm », le navigateur reprend le
+    titre de la page et commence donc souvent par le marche (« Mi-temps _ Forebet
+    Pronostics pour aujourd'hui.htm »). Tout fichier HTML dont le nom cite Forebet est
+    ramasse, le marche etant de toute facon reconnu au titre de la page et non au nom.
     """
     found: list[Path] = []
     seen: set[Path] = set()
     for folder in (Path.cwd(), Path(sys.argv[0]).resolve().parent):
-        for pattern in ("Pronostics*.htm*", "Predictions*.htm*"):
+        for pattern in ("*Forebet*.htm*", "Pronostics*.htm*", "Predictions*.htm*"):
             for path in sorted(folder.glob(pattern)):
                 resolved = path.resolve()
                 if resolved not in seen:

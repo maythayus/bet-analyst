@@ -59,7 +59,7 @@ from betbot.pipeline import (
 )
 from betbot.report import build_markdown
 from betbot.share import ShareError, markdown_to_html, publish_report, send_report
-from betbot.sources import bookmakers, flashscore
+from betbot.sources import bookmakers, flashscore, forebet
 from betbot.sources.forebet import parse_market_page, parse_predictions
 from betbot.sources.forebet_pages import (
     FOREBET_PAGES,
@@ -226,13 +226,43 @@ class TestForebetMarketPages(unittest.TestCase):
         self.assertIn("Forebet", str(raised.exception))
 
 
+class TestReadMarketPages(unittest.TestCase):
+    """Les fichiers etant ramasses automatiquement, un intrus ne doit rien casser."""
+
+    def test_an_unknown_page_is_skipped_not_fatal(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            good = root / "Chaque equipe marque _ Forebet.htm"
+            good.write_text(
+                _market_page("Chaque \u00e9quipe marque | Forebet", "Oui", "61"), encoding="utf-8"
+            )
+            intruder = root / "Forebet notes.htm"
+            intruder.write_text("<html><head><title>Forebet</title></head></html>", "utf-8")
+            (prediction,) = forebet.read_market_pages([intruder, good])
+        self.assertEqual(prediction.markets["Les deux marquent : oui"], 61.0)
+
+    def test_nothing_readable_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            intruder = Path(folder) / "Forebet notes.htm"
+            intruder.write_text("<html><head><title>Forebet</title></head></html>", "utf-8")
+            with self.assertRaises(FetchError) as raised:
+                forebet.read_market_pages([intruder])
+        self.assertIn("Forebet notes.htm", str(raised.exception))
+
+    def test_a_missing_file_is_still_an_error(self) -> None:
+        with self.assertRaises(FetchError):
+            forebet.read_market_pages([Path("chemin/inexistant.htm")])
+
+
 class TestDiscoverMarketPages(unittest.TestCase):
     def test_finds_saved_pages_in_the_current_folder(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             (root / "Pronostics Chaque equipe marque _ Forebet Football.htm").touch()
             (root / "Predictions Double chance _ Today Forebet Football.html").touch()
-            (root / "Forebet.htm").touch()
+            # Nom donne par le navigateur : il reprend le titre, donc le marche d'abord.
+            (root / "Mi-temps _ Forebet Pronostics pour aujourd'hui.htm").touch()
+            (root / "rapport.html").touch()
             with (
                 mock.patch("betbot.cli.Path.cwd", return_value=root),
                 mock.patch.object(sys, "argv", [str(root / "Bet.Bot.exe")]),
@@ -243,6 +273,7 @@ class TestDiscoverMarketPages(unittest.TestCase):
             {
                 "Pronostics Chaque equipe marque _ Forebet Football.htm",
                 "Predictions Double chance _ Today Forebet Football.html",
+                "Mi-temps _ Forebet Pronostics pour aujourd'hui.htm",
             },
         )
 
