@@ -219,6 +219,28 @@ class TestForebetMarketPages(unittest.TestCase):
         self.assertEqual(page, "1x2")
         self.assertEqual(prediction.markets, {"1": 52.0, "N": 27.0, "2": 21.0})
 
+    def test_the_titles_saved_by_the_browser_are_all_recognised(self) -> None:
+        """Titres reellement enregistres depuis Forebet : le marche precede « pour
+        aujourd'hui », qui sert aussi au listing 1X2 — la mi-temps ne doit donc pas
+        etre prise pour le listing."""
+        expected = {
+            "Pronostics de football pour aujourd\u2019hui | Forebet Pronostics": "1x2",
+            "Moins_Plus 2.5 de buts | Forebet Pr\u00e9dictions pour aujourd\u2019hui": (
+                "under/over 2.5 goals"
+            ),
+            "Mi-temps | Forebet Pronostics pour aujourd\u2019hui": "half time",
+            "Chaque \u00e9quipe marque | Forebet Pr\u00e9dictions pour aujourd\u2019hui": (
+                "both to score"
+            ),
+            "Chance double | Forebet Pr\u00e9dictions pour aujourd\u2019hui": "double chance",
+        }
+        for title, kind in expected.items():
+            with self.subTest(title=title):
+                page = forebet.market_page_kind(
+                    f"<html><head><title>{title}</title></head><body></body></html>"
+                )
+                self.assertEqual(page, kind)
+
     def test_rejects_an_unrelated_page(self) -> None:
         with self.assertRaises(FetchError) as raised:
             parse_market_page("<html><head><title>Forebet</title></head></html>")
