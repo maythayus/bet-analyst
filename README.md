@@ -356,8 +356,10 @@ pip install -r requirements.txt   # au cas où une dépendance aurait été ajou
 
 ## Côté LM Studio
 
-1. Télécharge le modèle **DeepSeek-R1-Distill-Llama-8B** en quantification `Q4_K_M`
-   (~5 Go, tient largement dans les 12 Go de VRAM de la 5070).
+1. Télécharge un modèle instruct. Le défaut est **DeepSeek-R1-Distill-Llama-8B** en
+   `Q4_K_M` (~5 Go) ; **Qwen2.5-14B-Instruct** en `Q4_K_M` (~9 Go) tient aussi dans
+   les 12 Go de la 5070 et suit mieux les formats demandés (`--model` ou
+   `LMSTUDIO_MODEL` avec l'identifiant affiché par LM Studio).
 2. Charge-le avec un contexte de 16384 tokens et **GPU offload au maximum**.
 3. Onglet **Developer** → **Start Server** (par défaut `http://localhost:1234`).
 
@@ -376,6 +378,24 @@ utilise pleinement — mais un contexte de 16384 reste la marge saine.
 $env:LMSTUDIO_API_KEY = "<ta-cle>"
 $env:LMSTUDIO_BASE_URL = "http://<hote>:1234/v1"   # si le serveur n'est pas local
 ```
+
+### Deux appels par match : questions fermées, puis avocat du diable
+
+Le LLM ne commente plus librement. Son analyse se termine par **quatre réponses
+fermées** — décision (`jouer`, `eviter`, `ne pas jouer`), marché retenu, source la moins
+crédible (`forebet`, `modele`, `marche`, `aucune`), risque principal — et une confiance
+sur 10, affichées dans un tableau « Réponses fermées » et dans le JSON (`verdict`). Une
+réponse hors des choix proposés est ignorée plutôt qu'affichée.
+
+Un **second appel** lui remet ensuite les mêmes données et sa propre analyse, avec pour
+seule consigne de chercher ce qui la contredit. Sa contre-analyse est jointe au rapport,
+le verdict ressort `maintenu` ou `renverse`, et la confiance révisée remplace la
+première. C'est la seule façon utile de « donner du temps » au LLM : deux appels courts
+plutôt qu'un long. Rien de tout ça ne touche une probabilité — le LLM n'en calcule pas,
+et les combinés ne le consultent pas.
+
+Le second appel double le temps LLM par match ; `--no-contre-analyse` (ou
+`LMSTUDIO_SECOND_PASS=0`) le désactive.
 
 ## Utilisation
 
@@ -786,6 +806,7 @@ Les rapports sont écrits dans `out/` : `rapport-<date>.md` (lisible) et
 | `LMSTUDIO_BASE_URL` | `http://localhost:1234/v1` | API LM Studio |
 | `LMSTUDIO_MODEL` | `deepseek-r1-distill-llama-8b` | modèle chargé |
 | `LMSTUDIO_TEMPERATURE` | `0` | déterminisme (à laisser à 0) |
+| `LMSTUDIO_SECOND_PASS` | `1` | `0` pour supprimer le second appel « avocat du diable » |
 | `MAX_MATCHES` | `10` | nombre de matchs |
 | `FLASHSCORE_HEADLESS` | `1` | `0` pour voir le navigateur |
 | `FOREBET_URL` | page « predictions for today » | listing à scraper |

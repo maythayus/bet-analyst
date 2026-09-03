@@ -54,6 +54,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=None, help="dossier de sortie des rapports")
     parser.add_argument("--no-flashscore", action="store_true", help="ignorer Flashscore")
     parser.add_argument("--no-llm", action="store_true", help="rapport statistique seul, sans LLM")
+    parser.add_argument(
+        "--no-contre-analyse",
+        action="store_true",
+        help="un seul appel LLM par match, sans le second passage « avocat du diable »",
+    )
     parser.add_argument("--no-cache", action="store_true", help="forcer le telechargement")
     parser.add_argument(
         "--forebet-html",
@@ -407,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg.lmstudio.base_url = args.base_url
     if args.temperature is not None:
         cfg.lmstudio.temperature = args.temperature
+    if args.no_contre_analyse:
+        cfg.lmstudio.second_pass = False
 
     try:
         pairs = run(

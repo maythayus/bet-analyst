@@ -59,6 +59,9 @@ class LMStudioConfig:
     temperature: float = float(os.getenv("LMSTUDIO_TEMPERATURE", "0"))
     max_tokens: int = int(os.getenv("LMSTUDIO_MAX_TOKENS", "2048"))
     timeout: float = float(os.getenv("LMSTUDIO_TIMEOUT", "300"))
+    # Second appel « avocat du diable » : le LLM cherche ce qui contredit sa premiere
+    # analyse. Double le temps par match.
+    second_pass: bool = os.getenv("LMSTUDIO_SECOND_PASS", "1") not in ("0", "false", "non")
 
 
 @dataclass

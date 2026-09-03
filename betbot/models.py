@@ -358,6 +358,25 @@ class MatchBundle:
 
 
 @dataclass
+class Verdict:
+    """Reponses fermees du LLM, extraites du bloc JSON qui clot son analyse.
+
+    `decision` vaut `jouer`, `eviter` ou `ne pas jouer` ; `least_credible` designe la
+    source a laquelle le LLM fait le moins confiance (`forebet`, `modele`, `marche` ou
+    `aucune`). `confidence` est sur 10. Un champ absent de la reponse reste `None`.
+    """
+
+    decision: str | None = None
+    market: str | None = None
+    least_credible: str | None = None
+    main_risk: str | None = None
+    confidence: int | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass
 class Analysis:
     """Verdict produit par le LLM pour un match."""
 
@@ -365,3 +384,6 @@ class Analysis:
     markdown: str
     raw: str
     model: str
+    verdict: Verdict | None = None
+    rebuttal: str | None = None
+    upheld: bool | None = None

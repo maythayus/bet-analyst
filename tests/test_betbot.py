@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from betbot import (
     consensus,
     demo,
+    llm,
     pipeline,
     poisson,
     priority,
@@ -426,6 +427,64 @@ class TestLLMPrompt(unittest.TestCase):
         full = json.dumps(bundle.to_dict(), ensure_ascii=False, indent=2, default=str)
         short = json.dumps(bundle.to_prompt_dict(), ensure_ascii=False, default=str)
         self.assertLess(len(short), len(full) / 2)
+
+    FIRST_PASS = (
+        "<think>je reflechis</think>\n### Verdict\nLyon 1N.\n### Risques\nPeu.\n\n"
+        '```json\n{"decision": "Jouer", "marche": "1N", "source_moins_credible": "modele",\n'
+        ' "risque_principal": "defense de Lyon", "confiance": 7}\n```'
+    )
+    SECOND_PASS = (
+        "### Ce qui contredit l'analyse\nRennes marque a chaque sortie.\n\n"
+        '```json\n{"objection": "Rennes marque partout", "verdict_maintenu": false,\n'
+        ' "confiance_revisee": 4}\n```'
+    )
+
+    def test_closed_questions_are_read_and_removed_from_the_markdown(self) -> None:
+        verdict = llm.parse_verdict(self.FIRST_PASS)
+        assert verdict is not None
+        self.assertEqual(verdict.decision, "jouer")
+        self.assertEqual(verdict.market, "1N")
+        self.assertEqual(verdict.least_credible, "modele")
+        self.assertEqual(verdict.confidence, 7)
+        stripped = llm.strip_verdict(self.FIRST_PASS)
+        self.assertNotIn("```", stripped)
+        self.assertIn("### Risques", stripped)
+
+    def test_an_answer_outside_the_choices_is_not_a_decision(self) -> None:
+        verdict = llm.parse_verdict('```json\n{"decision": "peut-etre", "confiance": 42}\n```')
+        assert verdict is not None
+        self.assertIsNone(verdict.decision)
+        self.assertEqual(verdict.confidence, 10)
+        self.assertIsNone(llm.parse_verdict("### Verdict\nsans bloc JSON"))
+
+    def test_the_devils_advocate_can_overturn_and_lower_confidence(self) -> None:
+        """Deux appels : le second recoit la premiere analyse, et son avis est garde
+        a cote du verdict, sans toucher aux probabilites."""
+        client = LMStudioClient(LMStudioConfig(second_pass=True))
+        bundle = self._bundle()
+        with mock.patch.object(
+            client, "chat", side_effect=[self.FIRST_PASS, self.SECOND_PASS]
+        ) as chat:
+            analysis = client.analyse(bundle)
+        self.assertEqual(chat.call_count, 2)
+        self.assertIn("Lyon 1N.", chat.call_args_list[1].args[1])
+        assert analysis.verdict is not None
+        self.assertIs(analysis.upheld, False)
+        self.assertEqual(analysis.verdict.confidence, 4)
+        self.assertIn("Rennes marque", analysis.rebuttal or "")
+        self.assertNotIn("<think>", analysis.markdown)
+        markdown = report.build_markdown([(bundle, analysis)])
+        self.assertIn("| Decision | jouer |", markdown)
+        self.assertIn("| Verdict apres contre-analyse | renverse |", markdown)
+        self.assertIn("#### Contre-analyse", markdown)
+
+    def test_the_second_pass_can_be_switched_off(self) -> None:
+        client = LMStudioClient(LMStudioConfig(second_pass=False))
+        with mock.patch.object(client, "chat", return_value=self.FIRST_PASS) as chat:
+            analysis = client.analyse(self._bundle())
+        self.assertEqual(chat.call_count, 1)
+        self.assertIsNone(analysis.rebuttal)
+        self.assertIsNone(analysis.upheld)
 
     def test_a_context_overflow_says_what_to_change(self) -> None:
         """Sans ce message, le rapport sort sans commentaire et rien ne l'explique."""

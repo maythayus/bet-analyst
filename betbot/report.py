@@ -496,11 +496,36 @@ def build_markdown(
             parts += ["### Matchs pieges", traps_block, ""]
         if analysis:
             parts += [f"### Analyse LLM ({analysis.model})", analysis.markdown, ""]
+            verdict_block = _verdict_block(analysis)
+            if verdict_block:
+                parts += ["#### Reponses fermees", verdict_block, ""]
+            if analysis.rebuttal:
+                parts += ["#### Contre-analyse (avocat du diable)", analysis.rebuttal, ""]
         else:
             parts += ["### Analyse LLM", "_Non generee (LLM desactive ou injoignable)._", ""]
         parts.append("---")
 
     return "\n".join(parts)
+
+
+def _verdict_block(analysis: Analysis) -> str:
+    """Les quatre reponses fermees du LLM, puis le sort du verdict apres contre-analyse."""
+    verdict = analysis.verdict
+    if verdict is None:
+        return ""
+    rows = [
+        ("Decision", verdict.decision),
+        ("Marche retenu", verdict.market),
+        ("Source la moins credible", verdict.least_credible),
+        ("Risque principal", verdict.main_risk),
+        ("Confiance /10", None if verdict.confidence is None else str(verdict.confidence)),
+    ]
+    if analysis.rebuttal:
+        outcome = {True: "maintenu", False: "renverse", None: "non tranche"}[analysis.upheld]
+        rows.append(("Verdict apres contre-analyse", outcome))
+    lines = ["| Question | Reponse |", "| --- | --- |"]
+    lines += [f"| {label} | {value or '_non repondu_'} |" for label, value in rows]
+    return "\n".join(lines)
 
 
 def write_report(
@@ -526,6 +551,13 @@ def write_report(
                         "data": bundle.to_dict(),
                         "consensus": consensus.summary(bundle),
                         "analysis": analysis.markdown if analysis else None,
+                        "verdict": (
+                            analysis.verdict.to_dict()
+                            if analysis and analysis.verdict
+                            else None
+                        ),
+                        "rebuttal": analysis.rebuttal if analysis else None,
+                        "upheld": analysis.upheld if analysis else None,
                     }
                     for bundle, analysis in pairs
                 ],
