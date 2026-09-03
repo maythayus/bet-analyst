@@ -7,7 +7,6 @@ s'effondre tres vite, et c'est precisement ce que le module rend visible.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from math import prod
 
@@ -23,7 +22,7 @@ _SIGN_TO_MARKET = {"X": "N"}
 VALUE_TICKET_SIZES = (6, 8)
 BTTS_YES = "Les deux marquent : oui"
 BTTS_NO = "Les deux marquent : non"
-BTTS_MIX_LABEL = "Combine 4 selections (2 x les deux marquent oui, 2 x non)"
+MAX_TICKET_LABEL = "Combine maximum ({count} selections : tout ce qui passe)"
 # Marches ou Forebet publie sa propre probabilite : elle y est reunie a celle du modele
 # (voir `betbot.consensus`), et la selection exige `FOREBET_MIN_PROBABILITY` du consensus.
 FOREBET_MARKETS = (BTTS_YES, BTTS_NO, "1N", "N2", "12")
@@ -283,44 +282,45 @@ def _priced_selections(
     return [leg for leg in legs if _leg_value(leg) <= max_value]
 
 
-def _market_legs(bundles: list[MatchBundle], market: str, min_probability: float) -> list[Leg]:
-    """Selections cotees d'un seul marche, une par match, au-dessus du seuil de proba."""
-    legs: list[Leg] = []
+def _ranked_selections(
+    bundles: list[MatchBundle], min_leg_probability: float, max_leg_value: float
+) -> list[Leg]:
+    """Meilleure selection cotee de chaque match, de la plus interessante a la moins.
+
+    Le classement suit `market_calibrated` : par esperance quand le modele est cale sur
+    les cotes, par probabilite sinon (et sans plafond de valeur, l'ecart au marche etant
+    alors la regle).
+    """
+    calibrated = market_calibrated(bundles)
+    rank = _leg_value if calibrated else _leg_probability
+    cap = max_leg_value if calibrated else None
+
+    best_per_match: list[Leg] = []
     for bundle in bundles:
-        odds = bundle.market_prices().get(market)
-        if not odds or odds < MIN_LEG_ODDS:
-            continue
-        leg = _leg_for(bundle, market, odds, min_probability)
-        if leg:
-            legs.append(leg)
-    return legs
+        selections = _priced_selections(bundle, min_leg_probability, cap)
+        if selections:
+            best_per_match.append(max(selections, key=rank))
+    best_per_match.sort(key=rank, reverse=True)
+    return best_per_match
 
 
-def build_btts_mix_ticket(
+def build_max_ticket(
     bundles: list[MatchBundle],
     *,
-    yes_legs: int = 2,
-    no_legs: int = 2,
     min_leg_probability: float = MIN_LEG_PROBABILITY,
+    max_leg_value: float = MAX_LEG_VALUE,
 ) -> Ticket | None:
-    """Combine melant des « les deux marquent : oui » et des « non ».
+    """Combine qui empile toutes les selections valides du jour, une par match.
 
-    Aucun match ne peut se retrouver des deux cotes : les deux issues sont
-    complementaires, donc passe le seuil d'un cote l'autre tombe sous les 50 %. Les
-    selections sont classees comme celles des autres combines : par esperance quand le
-    modele est cale sur les cotes, par probabilite sinon.
-
-    Renvoie None quand le jour ne fournit pas assez de matchs cotes de chaque cote :
-    mieux vaut pas de ticket qu'un ticket bricole.
+    Aucune limite de taille : tant qu'une rencontre offre une selection au-dessus du
+    seuil, cotee au moins `MIN_LEG_ODDS` et non piegeuse, elle entre. Le gain affiche
+    grossit avec chaque match, et la probabilite fond d'autant : douze selections a
+    60 % ne passent qu'une fois sur 460. Sous deux selections, ce n'est pas un combine.
     """
-    rank: Callable[[Leg], float] = _leg_value if market_calibrated(bundles) else _leg_probability
-    chosen: list[Leg] = []
-    for market, count in ((BTTS_YES, yes_legs), (BTTS_NO, no_legs)):
-        legs = sorted(_market_legs(bundles, market, min_leg_probability), key=rank, reverse=True)
-        if len(legs) < count:
-            return None
-        chosen += legs[:count]
-    return _chronological(Ticket(chosen, label=BTTS_MIX_LABEL))
+    legs = _ranked_selections(bundles, min_leg_probability, max_leg_value)
+    if len(legs) < 2:
+        return None
+    return _chronological(Ticket(legs, label=MAX_TICKET_LABEL.format(count=len(legs))))
 
 
 def build_value_ticket(
@@ -344,17 +344,7 @@ def build_value_ticket(
     tri par esperance selectionnerait les erreurs du modele : les selections sont alors
     classees par probabilite decroissante, et le plafond de valeur ne s'applique pas.
     """
-    calibrated = market_calibrated(bundles)
-    rank = _leg_value if calibrated else _leg_probability
-    cap = max_leg_value if calibrated else None
-
-    best_per_match: list[Leg] = []
-    for bundle in bundles:
-        selections = _priced_selections(bundle, min_leg_probability, cap)
-        if selections:
-            best_per_match.append(max(selections, key=rank))
-
+    best_per_match = _ranked_selections(bundles, min_leg_probability, max_leg_value)
     if len(best_per_match) < legs:
         return None
-    best_per_match.sort(key=rank, reverse=True)
     return _chronological(Ticket(best_per_match[:legs]))

@@ -13,7 +13,7 @@ from betbot.combo import (
     MIN_LEG_PROBABILITY,
     VALUE_TICKET_SIZES,
     Ticket,
-    build_btts_mix_ticket,
+    build_max_ticket,
     build_value_ticket,
     kelly_share,
     market_calibrated,
@@ -398,11 +398,15 @@ def _ticket_block(ticket: Ticket, stake: float = 10.0) -> str:
 
 
 def value_tickets(bundles: list[MatchBundle]) -> list[Ticket]:
-    """Combines proposes en fin de rapport : le mixte « les deux marquent », puis les longs."""
-    tickets = [
-        build_btts_mix_ticket(bundles),
-        *(build_value_ticket(bundles, legs=size) for size in VALUE_TICKET_SIZES),
-    ]
+    """Combines proposes en fin de rapport : les tailles fixes, puis le maximum.
+
+    Le combine maximum n'est ajoute que s'il contient plus de selections que le plus
+    long des tickets fixes : sinon il en serait la copie.
+    """
+    tickets = [build_value_ticket(bundles, legs=size) for size in VALUE_TICKET_SIZES]
+    everything = build_max_ticket(bundles)
+    if everything and len(everything.legs) not in VALUE_TICKET_SIZES:
+        tickets.append(everything)
     return [ticket for ticket in tickets if ticket and ticket.legs]
 
 

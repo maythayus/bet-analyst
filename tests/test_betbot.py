@@ -17,7 +17,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from betbot import consensus, demo, poisson, priority, strength, tracking, trap
+from betbot import consensus, demo, poisson, priority, report, strength, tracking, trap
 from betbot.cli import discover_market_pages, open_report
 from betbot.combo import (
     BTTS_NO,
@@ -26,7 +26,7 @@ from betbot.combo import (
     SOURCE_CONSENSUS,
     SOURCE_MODEL,
     _leg_for,
-    build_btts_mix_ticket,
+    build_max_ticket,
     build_ticket,
     build_value_ticket,
     kelly_share,
@@ -1102,8 +1102,8 @@ class TestValueTicket(unittest.TestCase):
         self.assertTrue(all(leg.probability >= 55.0 for leg in ticket.legs))
 
 
-class TestBttsMixTicket(unittest.TestCase):
-    """Combine 4 : deux fois « les deux marquent : oui », deux fois « non »."""
+class TestMaxTicket(unittest.TestCase):
+    """Combine maximum : toutes les selections valides du jour, une par match."""
 
     def _bundle(self, index: int, btts: float) -> MatchBundle:
         """Match dont le modele est remplace par une probabilite BTTS imposee."""
@@ -1128,28 +1128,38 @@ class TestBttsMixTicket(unittest.TestCase):
             bookmakers=[BookmakerLine(bookmaker="Unibet", odds={BTTS_YES: 1.60, BTTS_NO: 2.20})],
         )
 
-    def test_two_legs_of_each_side_from_four_matches(self) -> None:
-        bundles = [self._bundle(0, 80.0), self._bundle(1, 70.0)]
-        bundles += [self._bundle(2, 20.0), self._bundle(3, 30.0)]
-        ticket = build_btts_mix_ticket(bundles)
+    def test_every_valid_match_enters_without_size_limit(self) -> None:
+        """Dix matchs qui passent : dix selections, une par match, oui comme non."""
+        bundles = [self._bundle(index, 80.0 - index) for index in range(5)]
+        bundles += [self._bundle(index, 20.0 + index) for index in range(5, 10)]
+        ticket = build_max_ticket(bundles)
         assert ticket is not None
-        markets = [leg.market for leg in ticket.legs]
-        self.assertEqual(markets.count(BTTS_YES), 2)
-        self.assertEqual(markets.count(BTTS_NO), 2)
-        self.assertEqual(len({leg.match for leg in ticket.legs}), 4)
+        self.assertEqual(len(ticket.legs), 10)
+        self.assertEqual(len({leg.match for leg in ticket.legs}), 10)
+        self.assertIn("10 selections", ticket.label or "")
+        self.assertEqual(ticket.deadline, "2026-07-26 10:00")
 
-    def test_no_ticket_when_one_side_is_missing(self) -> None:
-        bundles = [self._bundle(index, 80.0) for index in range(4)]
-        self.assertIsNone(build_btts_mix_ticket(bundles))
-
-    def test_the_likeliest_legs_win_with_the_form_model(self) -> None:
-        bundles = [self._bundle(0, 90.0), self._bundle(1, 80.0), self._bundle(2, 60.0)]
-        bundles += [self._bundle(3, 10.0), self._bundle(4, 20.0), self._bundle(5, 40.0)]
-        ticket = build_btts_mix_ticket(bundles)
+    def test_matches_under_the_threshold_stay_out(self) -> None:
+        """Un match a 52/48 n'a rien au-dessus de 55 % : il ne remplit pas le ticket."""
+        bundles = [self._bundle(0, 80.0), self._bundle(1, 52.0), self._bundle(2, 25.0)]
+        ticket = build_max_ticket(bundles)
         assert ticket is not None
         self.assertEqual(
-            sorted(leg.probability for leg in ticket.legs), [80.0, 80.0, 90.0, 90.0]
+            sorted(leg.match for leg in ticket.legs),
+            ["Equipe 0 vs Visiteur 0", "Equipe 2 vs Visiteur 2"],
         )
+
+    def test_one_selection_is_not_a_combo(self) -> None:
+        self.assertIsNone(build_max_ticket([self._bundle(0, 80.0), self._bundle(1, 50.0)]))
+
+    def test_report_adds_the_max_ticket_only_when_it_is_longer(self) -> None:
+        """Avec huit matchs valides, le combine 8 est deja le maximum : pas de doublon."""
+        eight = [self._bundle(index, 80.0) for index in range(8)]
+        self.assertEqual([len(t.legs) for t in report.value_tickets(eight)], [6, 8])
+        nine = [*eight, self._bundle(8, 75.0)]
+        self.assertEqual([len(t.legs) for t in report.value_tickets(nine)], [6, 8, 9])
+        five = eight[:5]
+        self.assertEqual([len(t.legs) for t in report.value_tickets(five)], [5])
 
 
 class TestForebetSourcedLegs(unittest.TestCase):

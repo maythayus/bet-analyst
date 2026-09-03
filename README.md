@@ -644,19 +644,7 @@ Lyon vs Rennes;1N et oui;2.35
 python -m betbot --matches 20 --only-bettable --odds-csv cotes.csv
 ```
 
-### Combiné 4 « les deux marquent » oui et non
-
-Le rapport ouvre la série des combinés par un ticket de 4 sélections composé de **deux
-« les deux équipes marquent : oui » et deux « non »**, une par match. Les deux issues
-étant complémentaires, aucune rencontre ne peut figurer des deux côtés : au-delà de 50 %
-d'un côté, l'autre passe sous le seuil de 55 %.
-
-Les probabilités viennent du modèle, les cotes d'Unibet, et les pages Forebet
-« both to score » fournissent le second avis affiché dans le tableau de chaque match
-(colonnes `yes` et `no`). Si le jour n'offre pas deux matchs cotés de chaque côté, le
-ticket n'est pas construit : mieux vaut pas de combiné qu'un combiné bricolé.
-
-### Combinés 6 et 8 sélections
+### Combinés 6, 8 et maximum
 
 À la suite du ticket `--combo`, le rapport ajoute automatiquement deux combinés longs à
 **marchés mélangés** : 6 puis 8 sélections, une seule par match (les issues d'une même
@@ -675,6 +663,12 @@ modèle :
 - `--poisson forme` (défaut) : par probabilité décroissante, sans plafond de valeur —
   ce modèle ignorant les cotes, sa plus grosse valeur affichée est son plus gros écart
   d'estimation.
+
+Vient ensuite le **combiné maximum** : toutes les sélections valides du jour, une par
+match, sans limite de taille — tant qu'une rencontre offre une sélection au-dessus de
+55 %, cotée au moins 1.20 et non signalée comme piège, elle entre. Il faut au moins deux
+sélections ; et quand le jour en offre exactement 6 ou 8, il n'est pas répété, le combiné
+fixe correspondant étant déjà le maximum.
 
 Chaque combiné affiche l'heure limite de validation, la probabilité estimée, la cote
 cumulée, la cote équitable, la valeur théorique et le gain pour 10 EUR misés. Ces mêmes
