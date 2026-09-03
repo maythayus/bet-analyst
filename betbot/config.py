@@ -55,9 +55,10 @@ class LMStudioConfig:
 
     base_url: str = os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
     api_key: str = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
-    model: str = os.getenv("LMSTUDIO_MODEL", "deepseek-r1-distill-llama-8b")
+    model: str = os.getenv("LMSTUDIO_MODEL", "qwen/qwen3-14b")
     temperature: float = float(os.getenv("LMSTUDIO_TEMPERATURE", "0"))
-    max_tokens: int = int(os.getenv("LMSTUDIO_MAX_TOKENS", "2048"))
+    # Le bloc <think> de Qwen3 compte dans la reponse : 2048 le faisait tronquer.
+    max_tokens: int = int(os.getenv("LMSTUDIO_MAX_TOKENS", "4096"))
     timeout: float = float(os.getenv("LMSTUDIO_TIMEOUT", "300"))
     # Second appel « avocat du diable » : le LLM cherche ce qui contredit sa premiere
     # analyse. Double le temps par match.

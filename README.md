@@ -30,7 +30,7 @@ Il **croise quatre sources** pour chaque rencontre pariable :
    équipes marquent », doubles chances et combinés lus sur la page de chaque match.
 
 Le tout est ensuite résumé par un **LLM local** (par défaut
-`deepseek-r1-distill-llama-8b` dans LM Studio ; `--model` pour en changer), dont le rôle
+`qwen/qwen3-14b` dans LM Studio ; `--model` pour en changer), dont le rôle
 est de commenter les désaccords entre sources — pas d'inventer un pronostic.
 
 Sont analysés **les matchs pariables, et eux seuls** : dès que les cotes Unibet sont
@@ -274,18 +274,21 @@ mise, gagnante ou perdante. Aucun logiciel ne supprime cette marge.
 Le seul élément exigeant est le LLM local. Le reste (scraping, Poisson, rapports) tourne
 sur n'importe quelle machine : quelques centaines de Mo de RAM et aucun GPU.
 
-Modèle de référence : **DeepSeek-R1-Distill-Llama-8B** (8 milliards de paramètres),
-chargé dans LM Studio.
+Modèle de référence : **Qwen3-14B** (14 milliards de paramètres), chargé dans LM Studio
+sous l'identifiant `qwen/qwen3-14b`.
 
 | Quantification | Taille du fichier | VRAM à prévoir | Commentaire |
 | --- | --- | --- | --- |
-| `Q4_K_M` | ~4.9 Go | **8 Go** | le bon compromis, celui utilisé ici |
-| `Q5_K_M` | ~5.7 Go | 10 Go | légèrement meilleur, à partir de 12 Go de VRAM |
-| `Q8_0` | ~8.5 Go | 12 Go | gain marginal pour cet usage |
+| `Q4_K_M` | ~9 Go | **12 Go** | le bon compromis, celui utilisé ici |
+| `Q3_K_M` | ~7 Go | 10 Go | si la VRAM manque ; qualité en retrait |
+| `Q5_K_M` | ~10.5 Go | 14 Go | ne tient plus entièrement sur 12 Go |
 
-La VRAM indiquée inclut le contexte : à 16384 tokens, le cache occupe environ 1 Go
-en plus du fichier. Sur une **RTX 5070 (12 Go)**, `Q4_K_M` avec 16384 tokens tient
-largement, GPU offload au maximum, et un match s'analyse en quelques secondes.
+La VRAM indiquée inclut le contexte : à 16384 tokens, le cache occupe environ 1.5 Go
+en plus du fichier. Sur une **RTX 5070 (12 Go)**, `Q4_K_M` avec 16384 tokens tient,
+GPU offload au maximum. Qwen3 réfléchit dans un bloc `<think>` avant de répondre (retiré
+du rapport) : ces tokens comptent dans la réponse, d'où un `max_tokens` à 4096.
+L'ancien défaut, **DeepSeek-R1-Distill-Llama-8B** `Q4_K_M` (~5 Go, 8 Go de VRAM), reste
+utilisable avec `--model deepseek-r1-distill-llama-8b`.
 
 | Composant | Minimum | Confortable |
 | --- | --- | --- |
@@ -356,10 +359,9 @@ pip install -r requirements.txt   # au cas où une dépendance aurait été ajou
 
 ## Côté LM Studio
 
-1. Télécharge un modèle instruct. Le défaut est **DeepSeek-R1-Distill-Llama-8B** en
-   `Q4_K_M` (~5 Go) ; **Qwen2.5-14B-Instruct** en `Q4_K_M` (~9 Go) tient aussi dans
-   les 12 Go de la 5070 et suit mieux les formats demandés (`--model` ou
-   `LMSTUDIO_MODEL` avec l'identifiant affiché par LM Studio).
+1. Télécharge **Qwen3-14B** en `Q4_K_M` (~9 Go, tient dans les 12 Go de la 5070). Si
+   LM Studio l'affiche sous un autre identifiant que `qwen/qwen3-14b`, passe-le par
+   `--model` ou `LMSTUDIO_MODEL`.
 2. Charge-le avec un contexte de 16384 tokens et **GPU offload au maximum**.
 3. Onglet **Developer** → **Start Server** (par défaut `http://localhost:1234`).
 
@@ -804,7 +806,8 @@ Les rapports sont écrits dans `out/` : `rapport-<date>.md` (lisible) et
 | Variable | Défaut | Rôle |
 | --- | --- | --- |
 | `LMSTUDIO_BASE_URL` | `http://localhost:1234/v1` | API LM Studio |
-| `LMSTUDIO_MODEL` | `deepseek-r1-distill-llama-8b` | modèle chargé |
+| `LMSTUDIO_MODEL` | `qwen/qwen3-14b` | modèle chargé |
+| `LMSTUDIO_MAX_TOKENS` | `4096` | longueur maximale de la réponse, bloc `<think>` compris |
 | `LMSTUDIO_TEMPERATURE` | `0` | déterminisme (à laisser à 0) |
 | `LMSTUDIO_SECOND_PASS` | `1` | `0` pour supprimer le second appel « avocat du diable » |
 | `MAX_MATCHES` | `10` | nombre de matchs |
