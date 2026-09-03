@@ -287,23 +287,21 @@ La VRAM indiquée inclut le contexte : à 16384 tokens, le cache occupe environ 
 en plus du fichier. Sur une **RTX 5070 (12 Go)**, `Q4_K_M` avec 16384 tokens tient,
 GPU offload au maximum. Qwen3 réfléchit dans un bloc `<think>` avant de répondre (retiré
 du rapport) : ces tokens comptent dans la réponse, d'où un `max_tokens` à 4096.
-L'ancien défaut, **DeepSeek-R1-Distill-Llama-8B** `Q4_K_M` (~5 Go, 8 Go de VRAM), reste
-utilisable avec `--model deepseek-r1-distill-llama-8b`.
 
 | Composant | Minimum | Confortable |
 | --- | --- | --- |
-| GPU | 8 Go de VRAM (RTX 3060, 4060) | 12 Go et plus (RTX 4070, 5070) |
-| RAM système | 8 Go | 16 Go |
-| Disque | 10 Go libres (modèle + Chromium + caches) | 20 Go |
+| GPU | 12 Go de VRAM (RTX 4070, 5070) pour Qwen3-14B `Q4_K_M` | 16 Go et plus |
+| RAM système | 16 Go | 32 Go |
+| Disque | 15 Go libres (modèle + Chromium + caches) | 25 Go |
 | Connexion | indispensable (Unibet, Flashscore) | — |
 
 **Sans GPU suffisant**, deux voies :
 
 - Laisser LM Studio décharger une partie des couches sur le CPU : ça fonctionne, mais
   comptez plusieurs minutes par match plutôt que quelques secondes.
-- Prendre un modèle plus léger, par exemple `qwen2.5-7b-instruct` en `Q4_K_M` (~4.7 Go)
-  ou `llama-3.2-3b-instruct` en `Q4_K_M` (~2 Go), avec
-  `python -m betbot --model <identifiant>`.
+- Prendre un Qwen3 plus léger, `qwen/qwen3-8b` en `Q4_K_M` (~5 Go, 8 Go de VRAM) ou
+  `qwen/qwen3-4b` (~2.5 Go), avec `python -m betbot --model <identifiant>` : même
+  format de réponse, commentaire moins fin.
 
 **Sans LLM du tout**, `--no-llm` produit le rapport complet — probabilités, cotes, valeur,
 ticket — sans le commentaire rédigé. C'est la partie chiffrée, et elle ne dépend pas du
@@ -369,9 +367,10 @@ Un serveur local n'exige aucune clé. S'il en demande une (serveur distant, LM S
 exposé sur le réseau), passe-la par `--api-key` ou par la variable `LMSTUDIO_API_KEY` :
 ne l'écris jamais dans le dépôt.
 
-Le point 2 n'est pas un détail : avec les **8192 tokens** par défaut, le serveur refuse
-la rencontre (`request (8300 tokens) exceeds the available context size`) et le rapport
-sort **sans commentaire pour ce match**, sans autre trace que le journal de LM Studio.
+Le point 2 n'est pas un détail : LM Studio charge par défaut un contexte bien plus court
+que ce que le modèle accepte ; trop court, le serveur refuse la rencontre (`request
+exceeds the available context size`) et le rapport sort **sans commentaire pour ce
+match** — Bet.Bot le signale désormais dans le journal.
 Bet.Bot n'envoie plus au modèle que ce dont le commentaire a besoin — le classement de
 la compétition et le détail des vingt matchs restent côté modèle de Poisson, qui les
 utilise pleinement — mais un contexte de 16384 reste la marge saine.
