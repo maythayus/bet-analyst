@@ -312,11 +312,15 @@ def run(
             )
 
     if odds:
+        # Flashscore n'est interroge que pour les rencontres cotees : une page de forme,
+        # une de classement et une de face-a-face par match non pariable, c'est du temps
+        # perdu pour un match qui n'entrera dans aucun ticket. Une rencontre demandee a
+        # la main (`--match`) echappe a ce tri, elle a ete voulue.
         before = len(predictions)
         predictions = filter_predictions(
             predictions,
             odds,
-            only_bettable=only_bettable,
+            only_bettable=only_bettable or not matches,
             min_probability=min_probability,
             min_odds=min_odds,
             odds_range=odds_range,

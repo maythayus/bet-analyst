@@ -17,7 +17,17 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from betbot import consensus, demo, poisson, priority, report, strength, tracking, trap
+from betbot import (
+    consensus,
+    demo,
+    pipeline,
+    poisson,
+    priority,
+    report,
+    strength,
+    tracking,
+    trap,
+)
 from betbot.cli import discover_market_pages, open_report
 from betbot.combo import (
     BTTS_NO,
@@ -912,6 +922,32 @@ class TestOddsFiltering(unittest.TestCase):
                 odds={"1": 1.20, "X": 6.0, "2": 12.0},
             )
         ]
+
+    def test_flashscore_is_only_asked_about_matches_unibet_prices(self) -> None:
+        """Sans `--only-bettable`, un match du listing Forebet absent d'Unibet n'atteint
+        pas Flashscore : il n'entrera dans aucun ticket."""
+        unpriced = ForebetPrediction(home_team="Brest", away_team="Nice", prob_home=70.0)
+        with (
+            mock.patch("betbot.pipeline.collect_odds", return_value=self.entries),
+            mock.patch(
+                "betbot.pipeline.forebet.fetch_predictions",
+                return_value=[self.prediction, unpriced],
+            ),
+            mock.patch("betbot.pipeline.priority.prioritise", side_effect=lambda p, _n: p),
+            mock.patch("betbot.pipeline.enrich_with_detailed_markets"),
+            mock.patch("betbot.pipeline.build_bundles", return_value=[]) as built,
+        ):
+            pipeline.run(AppConfig(), use_llm=False)
+        self.assertEqual(built.call_args.args[0], [self.prediction])
+
+    def test_a_match_asked_by_hand_is_kept_even_unpriced(self) -> None:
+        with (
+            mock.patch("betbot.pipeline.collect_odds", return_value=self.entries),
+            mock.patch("betbot.pipeline.enrich_with_detailed_markets"),
+            mock.patch("betbot.pipeline.build_bundles", return_value=[]) as built,
+        ):
+            pipeline.run(AppConfig(), use_llm=False, matches=["Brest vs Nice"])
+        self.assertEqual(len(built.call_args.args[0]), 1)
 
     def test_keeps_high_probability_pick(self) -> None:
         kept = filter_predictions(

@@ -33,9 +33,11 @@ Le tout est ensuite résumé par un **LLM local** (par défaut
 `deepseek-r1-distill-llama-8b` dans LM Studio ; `--model` pour en changer), dont le rôle
 est de commenter les désaccords entre sources — pas d'inventer un pronostic.
 
-Sont analysés **tous les matchs pariables**, c'est-à-dire ceux pour lesquels une cote
-Unibet existe (`--only-bettable`, ou `--from-unibet` pour partir directement de la
-grille des cotes).
+Sont analysés **les matchs pariables, et eux seuls** : dès que les cotes Unibet sont
+récupérées, une rencontre du listing Forebet qu'Unibet ne cote pas n'est pas envoyée à
+Flashscore — elle n'entrerait dans aucun ticket. `--from-unibet` part directement de la
+grille des cotes ; `--match` reste analysé même sans cote (`--only-bettable` pour
+l'écarter aussi).
 
 ## Le modèle Poisson
 

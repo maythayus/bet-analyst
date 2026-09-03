@@ -78,7 +78,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--only-bettable",
         action="store_true",
-        help="ne garder que les rencontres cotees chez un bookmaker",
+        help="ne garder que les rencontres cotees chez un bookmaker (c'est deja le cas "
+        "des que les cotes Unibet sont recuperees ; l'option ne l'impose qu'avec --match)",
     )
     parser.add_argument(
         "--odds-csv",
