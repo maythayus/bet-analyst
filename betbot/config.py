@@ -59,7 +59,10 @@ class LMStudioConfig:
     temperature: float = float(os.getenv("LMSTUDIO_TEMPERATURE", "0"))
     # Le bloc <think> de Qwen3 compte dans la reponse : 2048 le faisait tronquer.
     max_tokens: int = int(os.getenv("LMSTUDIO_MAX_TOKENS", "4096"))
-    timeout: float = float(os.getenv("LMSTUDIO_TIMEOUT", "300"))
+    timeout: float = float(os.getenv("LMSTUDIO_TIMEOUT", "600"))
+    # Mode reflexion de Qwen3 (bloc <think>) : coupe par defaut, il multipliait le temps
+    # par match jusqu'au delai d'attente sans ameliorer les reponses fermees.
+    thinking: bool = os.getenv("LMSTUDIO_THINKING", "0") not in ("0", "false", "non")
     # Second appel « avocat du diable » : le LLM cherche ce qui contredit sa premiere
     # analyse. Double le temps par match.
     second_pass: bool = os.getenv("LMSTUDIO_SECOND_PASS", "1") not in ("0", "false", "non")

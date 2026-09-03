@@ -190,6 +190,9 @@ class LMStudioClient:
         return [item["id"] for item in response.json().get("data", [])]
 
     def chat(self, system: str, user: str) -> str:
+        if not self.cfg.thinking:
+            # Interrupteur doux de Qwen3 ; les autres modeles l'ignorent.
+            user = f"{user.rstrip()}\n/no_think"
         payload = {
             "model": self.cfg.model,
             "messages": [

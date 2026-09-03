@@ -809,6 +809,8 @@ Les rapports sont écrits dans `out/` : `rapport-<date>.md` (lisible) et
 | `LMSTUDIO_MAX_TOKENS` | `4096` | longueur maximale de la réponse, bloc `<think>` compris |
 | `LMSTUDIO_TEMPERATURE` | `0` | déterminisme (à laisser à 0) |
 | `LMSTUDIO_SECOND_PASS` | `1` | `0` pour supprimer le second appel « avocat du diable » |
+| `LMSTUDIO_THINKING` | `0` | `1` pour réactiver le bloc `<think>` de Qwen3 (beaucoup plus lent, coupé par `/no_think` sinon) |
+| `LMSTUDIO_TIMEOUT` | `600` | secondes d'attente par appel avant « Read timed out » |
 | `MAX_MATCHES` | `10` | nombre de matchs |
 | `FLASHSCORE_HEADLESS` | `1` | `0` pour voir le navigateur |
 | `FOREBET_URL` | page « predictions for today » | listing à scraper |
