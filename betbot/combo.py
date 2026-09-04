@@ -43,6 +43,10 @@ MAX_LEG_VALUE = 25.0
 # perte de temps (« plus de 0.5 but » a 1.03) : elle occupe la premiere place du
 # classement par valeur sans rien rapporter.
 MIN_LEG_ODDS = 1.20
+# Plancher de probabilite d'un combine entier : au moins une chance sur trois. Un ticket
+# qui sort une fois sur dix n'est pas montre, meme si chacune de ses selections passe le
+# seuil : les combines longs disparaissent d'eux-memes des que le produit descend.
+MIN_TICKET_PROBABILITY = 100 / 3
 # Fraction du critere de Kelly appliquee aux mises conseillees. Kelly plein maximise la
 # croissance du capital si les probabilites sont exactes ; elles ne le sont jamais, et
 # une surestimation ruine le joueur. Le quart de Kelly est l'usage prudent.
@@ -212,22 +216,22 @@ def build_ticket(
     """Assemble le ticket le plus probable a partir des matchs analyses.
 
     Le produit des probabilites etant maximal quand on prend les selections les
-    plus probables, il suffit de trier. Si `min_probability` est fourni et que le
-    ticket a `legs` selections passe sous ce seuil, on retire les selections les
-    moins probables jusqu'a repasser au-dessus ; s'il n'en reste plus assez, on
-    renvoie None plutot qu'un ticket qui ne respecte pas la demande.
+    plus probables, il suffit de trier. Si le ticket a `legs` selections passe sous
+    `min_probability` (par defaut `MIN_TICKET_PROBABILITY`, une chance sur trois), on
+    retire les selections les moins probables jusqu'a repasser au-dessus ; s'il n'en
+    reste plus assez, on renvoie None plutot qu'un ticket qui ne respecte pas la demande.
     """
     selections = [leg for bundle in bundles if (leg := _best_selection(bundle, market))]
     selections.sort(key=lambda leg: leg.probability, reverse=True)
     if not selections:
         return None
 
+    floor = MIN_TICKET_PROBABILITY if min_probability is None else min_probability
     ticket = Ticket(selections[: max(legs, 1)])
-    if min_probability is not None:
-        while ticket.legs and ticket.probability < min_probability:
-            ticket = Ticket(ticket.legs[:-1])
-        if len(ticket.legs) < 2:
-            return None
+    while ticket.legs and ticket.probability < floor:
+        ticket = Ticket(ticket.legs[:-1])
+    if not ticket.legs or (len(ticket.legs) < 2 and len(ticket.legs) < legs):
+        return None
 
     return _chronological(ticket)
 
@@ -315,12 +319,16 @@ def build_max_ticket(
     Aucune limite de taille : tant qu'une rencontre offre une selection au-dessus du
     seuil, cotee au moins `MIN_LEG_ODDS` et non piegeuse, elle entre. Le gain affiche
     grossit avec chaque match, et la probabilite fond d'autant : douze selections a
-    60 % ne passent qu'une fois sur 460. Sous deux selections, ce n'est pas un combine.
+    60 % ne passent qu'une fois sur 460. Sous deux selections, ce n'est pas un combine,
+    et sous `MIN_TICKET_PROBABILITY` il n'est pas propose.
     """
     legs = _ranked_selections(bundles, min_leg_probability, max_leg_value)
     if len(legs) < 2:
         return None
-    return _chronological(Ticket(legs, label=MAX_TICKET_LABEL.format(count=len(legs))))
+    ticket = Ticket(legs, label=MAX_TICKET_LABEL.format(count=len(legs)))
+    if ticket.probability < MIN_TICKET_PROBABILITY:
+        return None
+    return _chronological(ticket)
 
 
 def build_value_ticket(
@@ -343,8 +351,14 @@ def build_value_ticket(
     Avec le modele de forme, dont l'ecart au marche est la regle et non l'exception, ce
     tri par esperance selectionnerait les erreurs du modele : les selections sont alors
     classees par probabilite decroissante, et le plafond de valeur ne s'applique pas.
+
+    Quel que soit le classement, un ticket dont la probabilite globale passe sous
+    `MIN_TICKET_PROBABILITY` n'est pas propose.
     """
     best_per_match = _ranked_selections(bundles, min_leg_probability, max_leg_value)
     if len(best_per_match) < legs:
         return None
-    return _chronological(Ticket(best_per_match[:legs]))
+    ticket = Ticket(best_per_match[:legs])
+    if ticket.probability < MIN_TICKET_PROBABILITY:
+        return None
+    return _chronological(ticket)

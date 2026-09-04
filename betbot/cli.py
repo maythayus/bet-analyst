@@ -160,8 +160,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=None,
         metavar="PCT",
-        help="probabilite minimale que le ticket passe ; les selections les moins "
-        "probables sont retirees jusqu'a atteindre ce seuil, ex. 25",
+        help="probabilite minimale que le ticket passe (defaut : 33, une chance sur "
+        "trois) ; les selections les moins probables sont retirees jusqu'a atteindre "
+        "ce seuil, ex. 50",
     )
     parser.add_argument(
         "--mail-to",

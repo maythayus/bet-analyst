@@ -34,6 +34,7 @@ from betbot.combo import (
     BTTS_NO,
     BTTS_YES,
     KELLY_MAX_SHARE,
+    MIN_TICKET_PROBABILITY,
     SOURCE_CONSENSUS,
     SOURCE_MODEL,
     _leg_for,
@@ -1142,6 +1143,13 @@ class TestCombo(unittest.TestCase):
     def test_unreachable_threshold_returns_no_ticket(self) -> None:
         self.assertIsNone(build_ticket(self.bundles, legs=2, min_probability=99.9))
 
+    def test_default_floor_is_one_chance_in_three(self) -> None:
+        """Sans seuil demande, le ticket est reduit jusqu'a garder au moins 33 %."""
+        ticket = build_ticket(self.bundles, legs=4)
+        assert ticket is not None
+        self.assertGreaterEqual(ticket.probability, MIN_TICKET_PROBABILITY)
+        self.assertLess(len(ticket.legs), 4)
+
 
 class TestValueTicket(unittest.TestCase):
     """Combines longs a marches melanges, batis sur les cotes reellement disponibles."""
@@ -1171,19 +1179,23 @@ class TestValueTicket(unittest.TestCase):
         return bundles
 
     def test_takes_one_priced_selection_per_match(self) -> None:
-        ticket = build_value_ticket(self._bundles(6), legs=6)
+        ticket = build_value_ticket(self._bundles(6), legs=2)
         assert ticket is not None
-        self.assertEqual(len(ticket.legs), 6)
-        self.assertEqual(len({leg.match for leg in ticket.legs}), 6)
+        self.assertEqual(len(ticket.legs), 2)
+        self.assertEqual(len({leg.match for leg in ticket.legs}), 2)
         self.assertTrue(all(leg.odds for leg in ticket.legs))
 
     def test_rejects_legs_the_model_judges_unlikely(self) -> None:
-        ticket = build_value_ticket(self._bundles(6), legs=6, min_leg_probability=60.0)
+        ticket = build_value_ticket(self._bundles(6), legs=2, min_leg_probability=60.0)
         assert ticket is not None
         self.assertTrue(all(leg.probability >= 60.0 for leg in ticket.legs))
 
     def test_returns_nothing_without_enough_priced_matches(self) -> None:
         self.assertIsNone(build_value_ticket(self._bundles(3), legs=8))
+
+    def test_returns_nothing_under_one_chance_in_three(self) -> None:
+        """Six selections a ~74 % : 16 % de chances, le ticket n'est pas propose."""
+        self.assertIsNone(build_value_ticket(self._bundles(6), legs=6))
 
     def test_the_form_model_picks_the_likeliest_leg_not_the_widest_gap(self) -> None:
         """Sans calibration, la plus grosse valeur affichee est la plus grosse erreur.
@@ -1191,7 +1203,7 @@ class TestValueTicket(unittest.TestCase):
         Le modele de forme est plus tranche que le marche : la cote 4.20 sur l'exterieur
         y semble une aubaine alors qu'elle reste le resultat le moins probable.
         """
-        ticket = build_value_ticket(self._bundles(6), legs=6)
+        ticket = build_value_ticket(self._bundles(6), legs=2)
         assert ticket is not None
         self.assertTrue(all(leg.market != "2" for leg in ticket.legs))
         self.assertTrue(all(leg.probability >= 55.0 for leg in ticket.legs))
@@ -1225,8 +1237,8 @@ class TestMaxTicket(unittest.TestCase):
 
     def test_every_valid_match_enters_without_size_limit(self) -> None:
         """Dix matchs qui passent : dix selections, une par match, oui comme non."""
-        bundles = [self._bundle(index, 80.0 - index) for index in range(5)]
-        bundles += [self._bundle(index, 20.0 + index) for index in range(5, 10)]
+        bundles = [self._bundle(index, 97.0 - index) for index in range(5)]
+        bundles += [self._bundle(index, 3.0 + index) for index in range(5, 10)]
         ticket = build_max_ticket(bundles)
         assert ticket is not None
         self.assertEqual(len(ticket.legs), 10)
@@ -1247,11 +1259,15 @@ class TestMaxTicket(unittest.TestCase):
     def test_one_selection_is_not_a_combo(self) -> None:
         self.assertIsNone(build_max_ticket([self._bundle(0, 80.0), self._bundle(1, 50.0)]))
 
+    def test_under_one_chance_in_three_is_not_proposed(self) -> None:
+        """Dix selections a 80 % passent une fois sur neuf : pas de ticket."""
+        self.assertIsNone(build_max_ticket([self._bundle(index, 80.0) for index in range(10)]))
+
     def test_report_adds_the_max_ticket_only_when_it_is_longer(self) -> None:
         """Avec huit matchs valides, le combine 8 est deja le maximum : pas de doublon."""
-        eight = [self._bundle(index, 80.0) for index in range(8)]
+        eight = [self._bundle(index, 95.0) for index in range(8)]
         self.assertEqual([len(t.legs) for t in report.value_tickets(eight)], [6, 8])
-        nine = [*eight, self._bundle(8, 75.0)]
+        nine = [*eight, self._bundle(8, 90.0)]
         self.assertEqual([len(t.legs) for t in report.value_tickets(nine)], [6, 8, 9])
         five = eight[:5]
         self.assertEqual([len(t.legs) for t in report.value_tickets(five)], [5])

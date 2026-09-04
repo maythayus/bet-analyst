@@ -620,8 +620,8 @@ python -m betbot --matches 20 --only-bettable --odds-range 1.65 1.95
 # ticket combine de 4 "les deux marquent", les plus probables du jour
 python -m betbot --matches 20 --combo 4 --combo-market "Les deux marquent : oui"
 
-# ... et seulement s'il a au moins 25 % de chances de passer
-python -m betbot --matches 20 --combo 4 --min-combo-prob 25
+# ... en exigeant 50 % de chances de passer (par defaut : une chance sur trois)
+python -m betbot --matches 20 --combo 4 --min-combo-prob 50
 
 # sans ouvrir la page de chaque match (pas de cote BTTS ni de combines)
 python -m betbot --matches 20 --only-bettable --no-detailed-odds
@@ -635,13 +635,15 @@ plus probables (une par match), sa probabilité de passer et la **cote minimale 
 exiger** pour que le pari ait une espérance positive. Les sélections y sont affichées
 **du coup d'envoi le plus tôt au plus tard**, et le rapport indique l'**heure limite du
 pari** : celle du premier match, au-delà de laquelle le combiné n'est plus jouable.
-`--min-combo-prob PCT` retire les
-sélections les moins probables jusqu'à ce que le ticket atteigne le seuil demandé, et
-n'affiche rien si même deux sélections n'y suffisent pas.
+**Aucun combiné n'est proposé sous une chance sur trois** (33 %) : le ticket principal
+est réduit aux sélections les plus probables jusqu'à repasser au-dessus, et les combinés
+6, 8 et maximum de fin de rapport disparaissent purement et simplement quand leur
+probabilité globale passe dessous. `--min-combo-prob PCT` remplace ce plancher par le
+seuil demandé ; rien n'est affiché si même deux sélections n'y suffisent pas.
 
 Exemple réel à 4 sélections : 83.9 % × 74.5 % × 74.2 % × 52.3 % = **24 %**, soit une fois
-sur quatre, et une cote minimale de 4.12. Avec `--min-combo-prob 40`, le ticket est
-ramené à 3 sélections : 46 % et cote minimale 2.16. C'est le compromis à connaître —
+sur quatre : sous le plancher, le ticket est ramené à 3 sélections, 46 % et cote minimale
+2.16. C'est le compromis à connaître —
 chaque sélection ajoutée gonfle le gain affiché et divise la chance de le toucher.
 
 Avec `--odds-range`, le rapport s'ouvre sur une section **Sélection** : un tableau
