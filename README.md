@@ -1,4 +1,9 @@
 # Bet.Bot
+<img width="480" height="359" alt="images2" src="https://github.com/user-attachments/assets/6873b75b-36cb-4d35-a4f8-5e07de1be97e" />
+<img width="512" height="512" alt="unnamed" src="https://github.com/user-attachments/assets/91367c7c-7791-4bc6-ba59-d26ce7e22e2d" />
+<img width="229" height="220" alt="images3" src="https://github.com/user-attachments/assets/5d26216d-f4f0-44da-a2d8-e86b817c7b08" />
+<img width="712" height="280" alt="images4" src="https://github.com/user-attachments/assets/b7222140-bbfd-4808-9045-bc9d4e1d2279" />
+<img width="500" height="400" alt="images" src="https://github.com/user-attachments/assets/362d319e-9b3e-4a43-86c9-6f3be35bad4b" />
 
 Pipeline local d'aide à l'analyse de paris sportifs :
 
