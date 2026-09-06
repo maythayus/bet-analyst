@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from betbot import consensus
+from betbot.btts import empirical_btts
 from betbot.combo import (
     MAX_LEG_VALUE,
     MIN_LEG_ODDS,
@@ -213,6 +214,7 @@ def _forebet_markets_block(bundle: MatchBundle) -> str:
             f"{f'{confidence:.0%}' if isinstance(confidence, float) else '-'} | "
             f"{f'{available[market]:.2f}' if available.get(market) else '-'} |"
         )
+    rows += _empirical_btts_lines(bundle)
     rows += [
         "",
         "_La valeur retenue pese Forebet a 60 % et le modele a 40 %, puis tire vers la plus "
@@ -225,6 +227,30 @@ def _forebet_markets_block(bundle: MatchBundle) -> str:
         "estimations proches ne valident rien : elles peuvent se tromper ensemble._",
     ]
     return "\n".join(rows)
+
+
+def _empirical_btts_lines(bundle: MatchBundle) -> list[str]:
+    """Ce que les derniers matchs Flashscore disent, en comptant, des deux marquent."""
+    found = empirical_btts(bundle.stats)
+    if found is None:
+        return []
+    stats = bundle.stats
+    h2h = (
+        f", {found.head_to_head:.0f} % dans les confrontations directes"
+        if found.head_to_head is not None
+        else ""
+    )
+    return [
+        "",
+        f"_Taux empirique Flashscore : les deux marquent dans {found.probability:.0f} % des "
+        f"cas ({stats.home_team} marque a {found.home_scores:.0f} %, {stats.away_team} a "
+        f"{found.away_scores:.0f} %{h2h}). {stats.home_team} a marque dans "
+        f"{100 * found.home.scored:.0f} % de ses derniers matchs et encaisse dans "
+        f"{100 * found.home.conceded:.0f} % ; {stats.away_team} respectivement "
+        f"{100 * found.away.scored:.0f} % et {100 * found.away.conceded:.0f} %. Ce taux compte "
+        f"pour moitie dans la colonne « Proba modele » des deux marquent, le Poisson pour "
+        "l'autre moitie._",
+    ]
 
 
 def _form_block(bundle: MatchBundle) -> str:
@@ -261,7 +287,7 @@ def _traps_block(bundle: MatchBundle) -> str:
     """
     lines = []
     for market in TRAP_MARKETS:
-        reasons = trap_reasons(bundle.stats, market, bundle.predicted_score)
+        reasons = trap_reasons(bundle.stats, market, bundle.predicted_score, bundle.forebet)
         if reasons:
             lines.append(f"- **{market}** : {', '.join(reasons)}")
     if not lines:

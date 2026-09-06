@@ -156,6 +156,23 @@ n'a.
 Quand Forebet ne publie pas un marché (mi-temps, seuils de buts, scores), le modèle
 décide seul, au même seuil de 55 %.
 
+### « Les deux marquent » : compter plutôt que supposer
+
+Sur ce marché, le côté « modèle » du consensus n'est pas le seul Poisson. Le détail des vingt
+derniers matchs Flashscore est **compté directement** (`betbot/btts.py`) : part de matchs
+où chaque équipe a marqué, part où elle a encaissé, part où les deux camps ont marqué —
+avec les mêmes pondérations que la forme (matchs récents plus lourds, domicile pour le
+receveur et extérieur pour le visiteur comptés 1,6 fois). La probabilité que le receveur
+marque est la moyenne de « son attaque a marqué » et « la défense adverse a encaissé »,
+idem pour le visiteur, et le produit des deux donne le taux empirique. Les confrontations
+directes (au moins deux) tirent ensuite ce taux vers ce que ces deux équipes font quand
+elles se rencontrent.
+
+Ce taux compte pour **moitié** de la colonne « Proba modèle » du BTTS oui et non, le
+Poisson pour l'autre moitié ; le rapport affiche le détail sous le tableau Forebet, et le
+JSON l'expose (`poisson` et `empirique` à côté de `modele`). Sans détail match par match
+(moins de cinq matchs), le Poisson reste seul, comme avant.
+
 ### Suivi des résultats : mesurer qui a raison
 
 Les 60/40 et les tolérances ci-dessus sont des **suppositions**, et rien ne permettait de
@@ -208,6 +225,9 @@ section « Matchs pièges » sous chaque match :
 | Signal | Ce qu'il écarte |
 | --- | --- |
 | Score pronostiqué par Forebet à 0-0, 1-0 ou 0-1 | « les deux marquent : oui », `12` |
+| Forebet à moins de 45 % sur « plus de 2.5 buts » | « les deux marquent : oui » |
+| Forebet à 60 % et plus sur « plus de 2.5 buts » | « les deux marquent : non » |
+| Favori Forebet à 65 % et plus (1X2) | « les deux marquent : oui » |
 | Deux défenses à moins de 1.0 but encaissé par match (classement de la saison) | « les deux marquent : oui » |
 | Une attaque à moins de 1.2 but marqué par match | « les deux marquent : oui » |
 | Confrontations directes à moins de 2 buts par match | « les deux marquent : oui » |

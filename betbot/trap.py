@@ -1,13 +1,16 @@
 """Detection des matchs pieges : rencontres ou la selection la plus probable sur le
 papier est la plus fragile en pratique.
 
-Trois lectures se completent, toutes tirees de Flashscore :
+Quatre lectures se completent, trois tirees de Flashscore et une de Forebet :
 
 - les **confrontations directes**, qui gardent la memoire de rencontres fermees ou
   prolifiques que la forme du moment ne raconte pas ;
 - le **classement**, qui mesure la tension : deux equipes voisines au classement jouent
   serre, un ecart large expose la double chance du mieux classe a domicile ;
-- la **solidite des defenses** sur la saison, plus stable que les cinq derniers matchs.
+- la **solidite des defenses** sur la saison, plus stable que les cinq derniers matchs ;
+- la **coherence des pages Forebet** entre elles : un « les deux marquent : oui » quand
+  Forebet voit moins de 2.5 buts ou un favori ecrasant se contredit lui-meme, comme un
+  « non » sur une rencontre qu'il annonce prolifique.
 
 Aucune de ces regles ne predit un resultat : elles disent qu'une selection est plus
 fragile qu'elle n'en a l'air, et l'ecartent des combines.
@@ -17,7 +20,7 @@ from __future__ import annotations
 
 import re
 
-from betbot.models import MatchStats, TableStanding, TeamForm
+from betbot.models import ForebetPrediction, MatchStats, TableStanding, TeamForm
 
 BTTS_YES = "Les deux marquent : oui"
 BTTS_NO = "Les deux marquent : non"
@@ -57,13 +60,21 @@ MIN_HEAD_TO_HEAD = 2
 # jouent sur un but, et c'est la que les pronostics se retournent. Un 1-1 n'entre pas
 # dans le compte, les deux equipes y marquant.
 CLOSED_GAME_GOALS = 1
+# Marche Forebet « plus de 2.5 buts » : en dessous de ce pourcentage la rencontre est
+# annoncee pauvre en buts, au-dessus elle est annoncee prolifique.
+OVER_25_MARKET = "Plus de 2.5 buts"
+LOW_SCORING_OVER_25 = 45.0
+HIGH_SCORING_OVER_25 = 60.0
+# Probabilite 1X2 Forebet au-dela de laquelle le favori est trop net pour qu'on compte
+# sur un but de l'autre camp.
+LOPSIDED_FAVOURITE = 65.0
 
 # Score d'une confrontation directe, dans un resume « 12.05. Lyon 2-1 Rennes ». Les
 # espaces sont indispensables : sans eux la date « 2026-03-02 » se lit comme un score.
 _SCORE = re.compile(r"(?<=\s)(\d{1,2})-(\d{1,2})(?=\s)")
 
 
-def _head_to_head_scores(stats: MatchStats) -> list[tuple[int, int]]:
+def head_to_head_scores(stats: MatchStats) -> list[tuple[int, int]]:
     """Scores des confrontations directes retenues pour la rencontre."""
     scores = []
     for summary in stats.head_to_head:
@@ -76,7 +87,7 @@ def _head_to_head_scores(stats: MatchStats) -> list[tuple[int, int]]:
 
 def head_to_head_goals(stats: MatchStats) -> float | None:
     """Buts par confrontation directe, None si l'echantillon est trop mince."""
-    scores = _head_to_head_scores(stats)
+    scores = head_to_head_scores(stats)
     if len(scores) < MIN_HEAD_TO_HEAD:
         return None
     return sum(home + away for home, away in scores) / len(scores)
@@ -84,7 +95,7 @@ def head_to_head_goals(stats: MatchStats) -> float | None:
 
 def head_to_head_draws(stats: MatchStats) -> float | None:
     """Part de nuls dans les confrontations directes, en fraction de 1."""
-    scores = _head_to_head_scores(stats)
+    scores = head_to_head_scores(stats)
     if len(scores) < MIN_HEAD_TO_HEAD:
         return None
     return sum(1 for home, away in scores if home == away) / len(scores)
@@ -131,12 +142,37 @@ def predicted_closed_game(predicted_score: str | None) -> bool:
     return home + away <= CLOSED_GAME_GOALS
 
 
+def _forebet_over_25(forebet: ForebetPrediction | None) -> float | None:
+    return forebet.markets.get(OVER_25_MARKET) if forebet else None
+
+
+def _lopsided_favourite(forebet: ForebetPrediction | None) -> tuple[str, float] | None:
+    """`(camp, probabilite)` du favori Forebet quand il ecrase la rencontre."""
+    if not forebet:
+        return None
+    sides = (("le receveur", forebet.prob_home), ("le visiteur", forebet.prob_away))
+    for side, probability in sides:
+        if probability is not None and probability >= LOPSIDED_FAVOURITE:
+            return side, probability
+    return None
+
+
 def _btts_yes_reasons(
-    stats: MatchStats, defences: tuple[float | None, float | None], predicted_score: str | None
+    stats: MatchStats,
+    defences: tuple[float | None, float | None],
+    predicted_score: str | None,
+    forebet: ForebetPrediction | None,
 ) -> list[str]:
     reasons = []
     if predicted_closed_game(predicted_score):
         reasons.append(f"score pronostique ferme ({predicted_score.strip()})")
+    over = _forebet_over_25(forebet)
+    if over is not None and over < LOW_SCORING_OVER_25:
+        reasons.append(f"Forebet ne donne que {over:.0f} % a plus de 2.5 buts")
+    favourite = _lopsided_favourite(forebet)
+    if favourite:
+        side, probability = favourite
+        reasons.append(f"favori trop net ({side} a {probability:.0f} % chez Forebet)")
     attacks = (
         scored_per_game(stats.home_table, stats.home_form),
         scored_per_game(stats.away_table, stats.away_form),
@@ -163,8 +199,15 @@ def _btts_yes_reasons(
     return reasons
 
 
-def _btts_no_reasons(stats: MatchStats, defences: tuple[float | None, float | None]) -> list[str]:
+def _btts_no_reasons(
+    stats: MatchStats,
+    defences: tuple[float | None, float | None],
+    forebet: ForebetPrediction | None,
+) -> list[str]:
     reasons = []
+    over = _forebet_over_25(forebet)
+    if over is not None and over >= HIGH_SCORING_OVER_25:
+        reasons.append(f"Forebet donne {over:.0f} % a plus de 2.5 buts")
     names = (stats.home_team, stats.away_team)
     for name, defence in zip(names, defences, strict=True):
         if defence is not None and defence >= LEAKY_DEFENCE:
@@ -230,16 +273,25 @@ def _double_chance_reasons(stats: MatchStats, market: str) -> list[str]:
     return reasons
 
 
-def trap_reasons(stats: MatchStats, market: str, predicted_score: str | None = None) -> list[str]:
-    """Raisons de considerer cette selection comme un piege, vide s'il n'y en a pas."""
+def trap_reasons(
+    stats: MatchStats,
+    market: str,
+    predicted_score: str | None = None,
+    forebet: ForebetPrediction | None = None,
+) -> list[str]:
+    """Raisons de considerer cette selection comme un piege, vide s'il n'y en a pas.
+
+    `forebet` apporte les autres pages Forebet (plus/moins 2.5 buts, 1X2) : un marche qui
+    les contredit est fragile meme si sa propre probabilite est haute.
+    """
     defences = (
         conceded_per_game(stats.home_table, stats.home_form),
         conceded_per_game(stats.away_table, stats.away_form),
     )
     if market == BTTS_YES:
-        return _btts_yes_reasons(stats, defences, predicted_score)
+        return _btts_yes_reasons(stats, defences, predicted_score, forebet)
     if market == BTTS_NO:
-        return _btts_no_reasons(stats, defences)
+        return _btts_no_reasons(stats, defences, forebet)
     if market == DOUBLE_CHANCE_NO_DRAW:
         return _no_draw_reasons(stats, predicted_score)
     if market in (DOUBLE_CHANCE_HOME, DOUBLE_CHANCE_AWAY):
@@ -247,5 +299,10 @@ def trap_reasons(stats: MatchStats, market: str, predicted_score: str | None = N
     return []
 
 
-def is_trap(stats: MatchStats, market: str, predicted_score: str | None = None) -> bool:
-    return bool(trap_reasons(stats, market, predicted_score))
+def is_trap(
+    stats: MatchStats,
+    market: str,
+    predicted_score: str | None = None,
+    forebet: ForebetPrediction | None = None,
+) -> bool:
+    return bool(trap_reasons(stats, market, predicted_score, forebet))

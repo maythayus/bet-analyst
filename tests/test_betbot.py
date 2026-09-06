@@ -18,6 +18,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from betbot import (
+    btts,
     consensus,
     demo,
     llm,
@@ -1757,6 +1758,121 @@ class TestTraps(unittest.TestCase):
         self.assertEqual(
             [trap.trap_reasons(bare, market) for market in trap.TRAP_MARKETS], [[]] * 5
         )
+
+    def test_forebet_seeing_few_goals_contradicts_both_teams_to_score(self) -> None:
+        """Un « oui » quand Forebet donne 40 % a plus de 2.5 buts se contredit."""
+        bare = MatchStats(home_team="A", away_team="B")
+        forebet = ForebetPrediction(
+            home_team="A", away_team="B", markets={"Plus de 2.5 buts": 40.0}
+        )
+        self.assertTrue(trap.is_trap(bare, BTTS_YES, None, forebet))
+        self.assertFalse(trap.is_trap(bare, BTTS_NO, None, forebet))
+
+    def test_forebet_seeing_many_goals_contradicts_the_clean_sheet(self) -> None:
+        bare = MatchStats(home_team="A", away_team="B")
+        forebet = ForebetPrediction(
+            home_team="A", away_team="B", markets={"Plus de 2.5 buts": 66.0}
+        )
+        self.assertTrue(trap.is_trap(bare, BTTS_NO, None, forebet))
+        self.assertFalse(trap.is_trap(bare, BTTS_YES, None, forebet))
+
+    def test_a_lopsided_favourite_undermines_both_teams_to_score(self) -> None:
+        """A 70 % pour le receveur, compter sur un but du visiteur est fragile."""
+        bare = MatchStats(home_team="A", away_team="B")
+        lopsided = ForebetPrediction(home_team="A", away_team="B", prob_home=70.0, prob_away=12.0)
+        reasons = trap.trap_reasons(bare, BTTS_YES, None, lopsided)
+        self.assertTrue(any("favori trop net" in reason for reason in reasons), reasons)
+        self.assertFalse(trap.is_trap(bare, BTTS_NO, None, lopsided))
+        balanced = ForebetPrediction(home_team="A", away_team="B", prob_home=48.0, prob_away=27.0)
+        self.assertFalse(trap.is_trap(bare, BTTS_YES, None, balanced))
+
+
+class TestEmpiricalBtts(unittest.TestCase):
+    """Taux empirique « les deux marquent » compte sur le detail des matchs Flashscore."""
+
+    def _form(self, name: str, matches: list[PlayedMatch]) -> TeamForm:
+        return TeamForm(name=name, matches=matches, matches_played=len(matches))
+
+    def _stats(
+        self, home: list[PlayedMatch], away: list[PlayedMatch], **changes: object
+    ) -> MatchStats:
+        base = MatchStats(
+            home_team="Recevant",
+            away_team="Visiteur",
+            home_form=self._form("Recevant", home),
+            away_form=self._form("Visiteur", away),
+        )
+        return replace(base, **changes)
+
+    def test_two_teams_that_always_score_and_concede_give_a_certainty(self) -> None:
+        open_game = [PlayedMatch("X", 2, 1, at_home=True)] * 10
+        found = btts.empirical_btts(self._stats(open_game, open_game))
+        assert found is not None
+        self.assertEqual(found.probability, 100.0)
+        self.assertEqual((found.home.scored, found.home.conceded, found.home.both), (1.0, 1.0, 1.0))
+
+    def test_a_team_that_never_scores_kills_the_market(self) -> None:
+        mute = [PlayedMatch("X", 0, 1, at_home=False)] * 10
+        strong = [PlayedMatch("X", 2, 0, at_home=True)] * 10
+        found = btts.empirical_btts(self._stats(strong, mute))
+        assert found is not None
+        # Le visiteur n'a jamais marque et le receveur jamais encaisse : 0 %.
+        self.assertEqual(found.away_scores, 0.0)
+        self.assertEqual(found.probability, 0.0)
+
+    def test_the_attack_and_the_opposing_defence_are_averaged(self) -> None:
+        """Receveur qui marque toujours, visiteur qui n'encaisse jamais : 50 % qu'il marque."""
+        home = [PlayedMatch("X", 2, 1, at_home=True)] * 10
+        away = [PlayedMatch("X", 1, 0, at_home=False)] * 10
+        found = btts.empirical_btts(self._stats(home, away))
+        assert found is not None
+        self.assertEqual(found.home_scores, 50.0)
+        self.assertEqual(found.away_scores, 100.0)
+        self.assertEqual(found.probability, 50.0)
+
+    def test_head_to_head_pulls_the_estimate(self) -> None:
+        open_game = [PlayedMatch("X", 2, 1, at_home=True)] * 10
+        closed = self._stats(
+            open_game,
+            open_game,
+            head_to_head=["10.05. Recevant 1-0 Visiteur", "12.12. Visiteur 0-0 Recevant"],
+        )
+        found = btts.empirical_btts(closed)
+        assert found is not None
+        self.assertEqual(found.head_to_head, 0.0)
+        # Deux face-a-face contre un a priori de quatre : un tiers du chemin vers 0.
+        self.assertAlmostEqual(found.probability, 100 * 4 / 6, places=1)
+
+    def test_too_few_detailed_matches_say_nothing(self) -> None:
+        short = [PlayedMatch("X", 2, 1, at_home=True)] * 3
+        self.assertIsNone(btts.empirical_btts(self._stats(short, short)))
+        self.assertIsNone(btts.empirical_btts(MatchStats(home_team="A", away_team="B")))
+
+    def test_the_empirical_rate_joins_the_poisson_in_the_consensus(self) -> None:
+        """Poisson a 60 %, empirique a 100 % : le cote modele vaut 80 %."""
+        open_game = [PlayedMatch("X", 2, 1, at_home=True)] * 10
+        stats = self._stats(open_game, open_game)
+        bundle = MatchBundle(
+            stats=stats,
+            poisson=PoissonResult(
+                prob_home=40.0,
+                prob_draw=30.0,
+                prob_away=30.0,
+                prob_over_25=50.0,
+                prob_btts=60.0,
+                expected_home_goals=1.4,
+                expected_away_goals=1.1,
+                most_likely_score="1-1",
+                markets={BTTS_YES: 60.0, BTTS_NO: 40.0, "1N": 70.0},
+            ),
+        )
+        self.assertEqual(consensus.model_for_market(bundle, BTTS_YES), 80.0)
+        self.assertEqual(consensus.model_for_market(bundle, BTTS_NO), 20.0)
+        # Les autres marches ne sont pas touches.
+        self.assertEqual(consensus.model_for_market(bundle, "1N"), 70.0)
+        agreed = consensus.for_market(bundle, BTTS_YES)
+        assert agreed is not None
+        self.assertEqual(agreed.probability, 80.0)
 
 
 class TestFlashscoreStandings(unittest.TestCase):

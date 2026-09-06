@@ -25,12 +25,18 @@ mecanismes traitent ce cas, du plus informe au plus prudent :
 
 Quand rien de tout cela ne tranche, aucun consensus n'est renvoye et le marche est ecarte
 des combines : mieux vaut ne rien jouer qu'un chiffre auquel personne ne croit vraiment.
+
+Sur « les deux marquent », le cote modele n'est pas le seul Poisson : le taux empirique tire
+du detail des matchs Flashscore (`betbot.btts`) y entre a parts egales. Le Poisson suppose
+une distribution des buts ; le comptage, lui, dit combien de fois les deux camps ont
+reellement marque.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from betbot.btts import empirical_btts
 from betbot.models import MatchBundle
 
 # Poids de Forebet dans la moyenne. Au-dessus de la moitie : son historique couvre des
@@ -48,6 +54,12 @@ TOLERANCE_AT_EXTREME = 1.4
 # pour que le bookmaker soit dit avoir tranche. En dessous, les deux sont aussi credibles
 # et le marche reste ecarte.
 ARBITRATION_MARGIN = 5.0
+
+# Poids du taux empirique Flashscore dans l'estimation « modele » des marches les deux
+# marquent, le reste allant au Poisson.
+EMPIRICAL_WEIGHT = 0.5
+BTTS_YES = "Les deux marquent : oui"
+BTTS_NO = "Les deux marquent : non"
 
 SOURCE_CONSENSUS = "Forebet+modele"
 SOURCE_FOREBET = "Forebet"
@@ -177,10 +189,31 @@ def blend(
     return Consensus(round(probability, 2), SOURCE_CONSENSUS, gap, round(1 - doubt, 2))
 
 
+def empirical_for_market(bundle: MatchBundle, market: str) -> float | None:
+    """Taux empirique Flashscore du marche, en %, seulement pour les deux marquent."""
+    if market not in (BTTS_YES, BTTS_NO):
+        return None
+    found = empirical_btts(bundle.stats)
+    if found is None:
+        return None
+    return found.probability if market == BTTS_YES else round(100 - found.probability, 2)
+
+
+def model_for_market(bundle: MatchBundle, market: str) -> float | None:
+    """Estimation du cote modele : le Poisson, rejoint par le taux empirique sur le BTTS."""
+    poisson = bundle.poisson.markets.get(market) if bundle.poisson else None
+    empirical = empirical_for_market(bundle, market)
+    if empirical is None:
+        return poisson
+    if poisson is None:
+        return empirical
+    return round((1 - EMPIRICAL_WEIGHT) * poisson + EMPIRICAL_WEIGHT * empirical, 2)
+
+
 def for_market(bundle: MatchBundle, market: str) -> Consensus | None:
     """Consensus des deux sources sur un marche de la rencontre, la cote en arbitre."""
     forebet = bundle.forebet.markets.get(market) if bundle.forebet else None
-    model = bundle.poisson.markets.get(market) if bundle.poisson else None
+    model = model_for_market(bundle, market)
     return blend(forebet, model, implied_for_market(bundle, market))
 
 
@@ -191,16 +224,17 @@ def summary(bundle: MatchBundle) -> dict[str, dict[str, float | str | bool | Non
     c'est ce qui permet de voir un desaccord au lieu de le lisser.
     """
     forebet_markets = bundle.forebet.markets if bundle.forebet else {}
-    model_markets = bundle.poisson.markets if bundle.poisson else {}
     detail: dict[str, dict[str, float | str | bool | None]] = {}
     for market, forebet in forebet_markets.items():
-        model = model_markets.get(market)
+        model = model_for_market(bundle, market)
         implied = implied_for_market(bundle, market)
         agreed = blend(forebet, model, implied)
         gap = round(abs(forebet - model), 2) if model is not None else None
         detail[market] = {
             "forebet": forebet,
             "modele": model,
+            "poisson": bundle.poisson.markets.get(market) if bundle.poisson else None,
+            "empirique": empirical_for_market(bundle, market),
             "cote_implicite": implied,
             "retenu": agreed.probability if agreed else None,
             "ecart": gap,
