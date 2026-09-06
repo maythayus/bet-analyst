@@ -162,7 +162,8 @@ def _leg_for(
 
     Une selection designee comme piege par `betbot.trap` est refusee quelle que soit sa
     probabilite : classement serre, defenses trop solides ou trop friables, score
-    pronostique ferme, ou confrontations directes qui racontent l'inverse.
+    pronostique ferme, confrontations directes qui racontent l'inverse, ou pages Forebet
+    (plus/moins 2.5 buts, 1X2) qui contredisent le marche.
     """
     if market in FOREBET_MARKETS:
         agreed = consensus.for_market(bundle, market)
@@ -179,7 +180,9 @@ def _leg_for(
             return None
         probability, source, floor = model, SOURCE_MODEL, min_probability
 
-    if probability < floor or trap_reasons(bundle.stats, market, bundle.predicted_score):
+    if probability < floor or trap_reasons(
+        bundle.stats, market, bundle.predicted_score, bundle.forebet
+    ):
         return None
     return Leg(bundle.label, market, probability, odds, bundle.stats.kickoff, source)
 
