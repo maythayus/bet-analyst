@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,8 +22,31 @@ DEFAULT_CACHE_DIR = PROJECT_ROOT / ".cache"
 # recree a chaque lancement : on le renvoie vers l'emplacement standard de l'utilisateur.
 if getattr(sys, "frozen", False):
     os.environ.setdefault(
-        "PLAYWRIGHT_BROWSERS_PATH", str(Path.home() / "AppData" / "Local" / "ms-playwright")
+        "PLAYWRIGHT_BROWSERS_PATH",
+        str(
+            Path.home() / "AppData" / "Local" / "ms-playwright"
+            if sys.platform == "win32"
+            else Path.home() / ".cache" / "ms-playwright"
+        ),
     )
+
+
+def system_chromium() -> str | None:
+    """Chromium installe par le systeme, en repli du navigateur de Playwright.
+
+    Sous Linux (Omarchy, Arch...), Chromium vient du gestionnaire de paquets et
+    `playwright install chromium` n'est pas toujours fait. BETBOT_CHROMIUM force un chemin.
+    """
+    forced = os.getenv("BETBOT_CHROMIUM")
+    if forced:
+        return forced
+    if sys.platform == "win32":
+        return None
+    for name in ("chromium", "chromium-browser", "google-chrome-stable", "google-chrome"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
 
 
 def _load_env_file(path: Path) -> None:

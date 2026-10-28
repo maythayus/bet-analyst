@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from betbot.config import USER_AGENT, ScrapeConfig
+from betbot.config import USER_AGENT, ScrapeConfig, system_chromium
 
 log = logging.getLogger(__name__)
 
@@ -109,20 +109,31 @@ def save_pages(
                 str(profile), channel="chrome", headless=headless, locale="fr-FR", args=browser_args
             )
         except PlaywrightError:
-            log.info("Chrome introuvable : le Chromium de Playwright prend le relais.")
-            try:
-                context = playwright.chromium.launch_persistent_context(
-                    str(profile),
-                    headless=headless,
-                    locale="fr-FR",
-                    user_agent=USER_AGENT,
-                    args=browser_args,
+            # Chromium du systeme d'abord (Omarchy l'installe d'office) : un vrai
+            # navigateur, avec son propre agent utilisateur, comme Chrome ci-dessus.
+            executable = system_chromium()
+            fallbacks: list[dict[str, str]] = [{"user_agent": USER_AGENT}]
+            if executable:
+                fallbacks.insert(0, {"executable_path": executable})
+            context = None
+            last_error: Exception | None = None
+            for extra in fallbacks:
+                log.info(
+                    "Chrome introuvable : repli sur %s",
+                    extra.get("executable_path", "le Chromium de Playwright"),
                 )
-            except PlaywrightError as exc:  # pragma: no cover - depend de l'installation
+                try:
+                    context = playwright.chromium.launch_persistent_context(
+                        str(profile), headless=headless, locale="fr-FR", args=browser_args, **extra
+                    )
+                    break
+                except PlaywrightError as exc:  # pragma: no cover - depend de l'installation
+                    last_error = exc
+            if context is None:  # pragma: no cover - depend de l'installation
                 raise ForebetSaveError(
-                    "Aucun navigateur utilisable. Installe Chrome, ou lance une fois : "
-                    "Bet.Bot.exe --install-chromium (ou playwright install chromium)"
-                ) from exc
+                    "Aucun navigateur utilisable. Installe Chrome ou Chromium, ou lance une "
+                    "fois : Bet.Bot.exe --install-chromium (ou playwright install chromium)"
+                ) from last_error
 
         page = context.new_page()
         try:

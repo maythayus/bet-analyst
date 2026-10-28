@@ -24,7 +24,7 @@ from typing import Any
 
 import requests
 
-from betbot.config import USER_AGENT, ScrapeConfig
+from betbot.config import USER_AGENT, ScrapeConfig, system_chromium
 from betbot.models import MatchStats, PlayedMatch, TableStanding, TeamForm
 from betbot.sources.bookmakers import normalise, similarity
 
@@ -477,11 +477,19 @@ def _flashscore_page(cfg: ScrapeConfig, url: str) -> Iterator[Any]:
 
     log.info("Flashscore : %s", url)
     with sync_playwright() as playwright:
+        launch_args = {
+            "headless": cfg.flashscore_headless,
+            "args": ["--disable-blink-features=AutomationControlled"],
+        }
         try:
-            browser = playwright.chromium.launch(
-                headless=cfg.flashscore_headless,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
+            try:
+                browser = playwright.chromium.launch(**launch_args)
+            except PlaywrightError:
+                executable = system_chromium()
+                if not executable:
+                    raise
+                log.info("Chromium de Playwright absent : repli sur %s", executable)
+                browser = playwright.chromium.launch(executable_path=executable, **launch_args)
         except PlaywrightError as exc:  # pragma: no cover - depend de l'installation
             raise FlashscoreUnavailable(
                 "Chromium n'est pas installe. Lance une fois : "

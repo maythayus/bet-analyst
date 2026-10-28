@@ -374,6 +374,28 @@ git pull
 pip install -r requirements.txt   # au cas où une dépendance aurait été ajoutée
 ```
 
+## Installation (Linux, Omarchy)
+
+```bash
+git clone https://github.com/maythayus/bet-analyst.git
+cd bet-analyst
+./installer-linux.sh            # venv, dépendances, copie de .env.exemple en .env
+./analyse.sh --demo --no-llm    # essai sans réseau ni LLM
+./analyse.sh                    # analyse de la journée (équivalent de analyse.cmd)
+```
+
+- **Navigateur** : le Chromium du système (`/usr/bin/chromium`, présent d'office sous
+  Omarchy) est utilisé quand celui de Playwright n'est pas installé — pas besoin de
+  `playwright install chromium`. `BETBOT_CHROMIUM=/chemin/vers/chrome` force un autre
+  navigateur.
+- **LM Studio** : version AppImage sur <https://lmstudio.ai>, serveur local sur le port
+  1234 comme sous Windows (`lms server start` en ligne de commande).
+- **Analyse quotidienne** : `./installer-linux.sh --timer` pose un minuteur systemd
+  utilisateur (8h00, rattrapé au démarrage si la machine était éteinte) qui lance
+  `analyse-quotidienne.sh` ; une notification de bureau annonce le rapport ou l'échec.
+  Journal : `journalctl --user -u betbot`. Première exécution à la main
+  (`./analyse-quotidienne.sh`) pour valider l'éventuelle vérification Cloudflare.
+
 ## Côté LM Studio
 
 1. Télécharge **Qwen3-14B** en `Q4_K_M` (~9 Go, tient dans les 12 Go de la 5070). Si

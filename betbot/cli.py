@@ -284,8 +284,16 @@ def open_report(path: Path) -> None:
             except OSError:
                 subprocess.run(["notepad.exe", str(path)], check=False)
         else:
+            # Detache : sous Linux, xdg-open peut attendre la fermeture de l'application
+            # ouverte (Obsidian, editeur dans un terminal...) et bloquait l'analyse.
             opener = "open" if sys.platform == "darwin" else "xdg-open"
-            subprocess.run([opener, str(path)], check=False)
+            subprocess.Popen(
+                [opener, str(path)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
     except OSError as exc:
         log.debug("Ouverture du rapport impossible : %s", exc)
 
