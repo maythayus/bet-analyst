@@ -716,6 +716,23 @@ Lyon vs Rennes;1N et oui;2.35
 python -m betbot --matches 20 --only-bettable --odds-csv cotes.csv
 ```
 
+### Combinés à composition imposée
+
+Le rapport commence par quatre combinés dont la composition est fixée. Le plancher d'une
+chance sur trois ne s'y applique pas : **leur probabilité est souvent très faible**, et
+elle est affichée telle quelle. S'il manque des sélections, une ligne le dit à la place.
+
+- **4 matchs « les deux marquent »**, en deux versions : 4 oui, et 2 oui + 2 non. Les plus
+  probables, un par match (au moins 55 %, cotés en priorité).
+- **Panachés 6 et 8 sélections** : buteur, mi-temps, double chance, plus/moins de 2.5 buts,
+  un par match, tous cotés. Répartition : 1 + 1 + 2 + 2 pour le 6, 2 + 2 + 2 + 2 pour le 8.
+
+Le **buteur** est le joueur le moins coté de son match, `Buteur : Nom` dans la colonne
+Marché. Aucune source ne chiffre sa chance : elle vient de la cote Unibet, marge retirée
+(× 0,85), source `cote`. Ce n'est pas une prédiction, et un joueur remplaçant peut ne pas
+jouer du tout. La **mi-temps** (1 N 2) vient de Forebet, à 45 % minimum. Une sélection
+dont la valeur dépasse +25 % est écartée, quel que soit le modèle.
+
 ### Combinés 6, 8 et maximum
 
 À la suite du ticket `--combo`, le rapport ajoute automatiquement deux combinés longs à

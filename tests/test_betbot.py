@@ -39,7 +39,9 @@ from betbot.combo import (
     SOURCE_CONSENSUS,
     SOURCE_MODEL,
     _leg_for,
+    build_btts_split_ticket,
     build_max_ticket,
+    build_mixed_ticket,
     build_ticket,
     build_value_ticket,
     kelly_share,
@@ -153,6 +155,32 @@ class TestForebetMarketPages(unittest.TestCase):
             _market_page("Predictions Double chance | Today Forebet Football", "X1", "74")
         )
         self.assertEqual(prediction.markets, {"1N": 74.0})
+
+    def test_listing_keeps_one_entry_per_match(self) -> None:
+        """Bloc sans probabilites puis vraie ligne, ou l'inverse : un seul match, chiffre."""
+        teams = "<div class='homeTeam'><span>A</span></div><div class='awayTeam'><span>B</span></div>"
+        full = (
+            f"<div class='rcnt'>{teams}<div class='fprc'><span>50</span><span>30</span>"
+            "<span>20</span></div></div>"
+        )
+        empty = f"<div class='rcnt'>{teams}</div>"
+        for html in (full + empty, empty + full):
+            with self.subTest(html=html):
+                predictions = parse_predictions(html)
+                self.assertEqual(len(predictions), 1)
+                self.assertEqual(predictions[0].prob_home, 50.0)
+
+    def test_half_time_nested_favourite_counts_once(self) -> None:
+        """Le pronostic retenu porte un span imbrique : 60-14-26, pas 60-60-14."""
+        html = (
+            "<html><head><title>Mi-temps | Forebet</title></head><body><div class='rcnt'>"
+            "<div class='homeTeam'><span>A</span></div><div class='awayTeam'><span>B</span></div>"
+            "<div class='fprc'><span><span class='fpr'>60</span></span><span>14</span>"
+            "<span>26</span></div><span class='forepr'>1</span></div></body></html>"
+        )
+        _, (half,) = parse_market_page(html)
+        self.assertEqual(half.markets["N (1re mi-temps)"], 14.0)
+        self.assertEqual(half.markets["2 (1re mi-temps)"], 26.0)
 
     def test_half_time_page_reads_the_three_columns(self) -> None:
         _, (prediction,) = parse_market_page(
@@ -924,8 +952,14 @@ UNIBET_DETAIL = "".join(
             "Les 2 \u00e9quipes marqueront elles ? - P\u00e9riodes",
             [("Oui", "3,25"), ("Non", "1,15")],
         ),
-        # Marche sans equivalent dans le modele : doit etre ignore.
+        _card(
+            "1 N 2 - 1\u00e8re Mi-temps",
+            [("Lyon", "2,40"), ("N", "2,10"), ("Rennes", "4,50")],
+            labelled=True,
+        ),
         _card("Buteurs - 90 Mins", [("Alexandre Lacazette", "2,50")]),
+        # Marche sans equivalent : doit etre ignore.
+        _card("Buteur 2+ MT - 1\u00e8re Mi-temps", [("Alexandre Lacazette", "9,00")]),
     ]
 )
 
@@ -956,17 +990,27 @@ class TestDetailedMarkets(unittest.TestCase):
         self.assertEqual(self.odds["1 et plus de 1.5 buts"], 1.90)
         self.assertEqual(self.odds["1N et plus de 2.5 buts"], 1.80)
 
+    def test_reads_half_time_result_in_order(self) -> None:
+        self.assertEqual(self.odds["1 (1re mi-temps)"], 2.40)
+        self.assertEqual(self.odds["N (1re mi-temps)"], 2.10)
+        self.assertEqual(self.odds["2 (1re mi-temps)"], 4.50)
+
+    def test_reads_only_the_anytime_scorer_card(self) -> None:
+        self.assertEqual(self.odds["Buteur : Alexandre Lacazette"], 2.50)
+
     def test_reads_first_half_both_teams_to_score(self) -> None:
         self.assertEqual(self.odds[poisson.FIRST_HALF_BTTS], 3.25)
 
-    def test_ignores_markets_absent_from_the_model(self) -> None:
+    def test_ignores_markets_without_any_use(self) -> None:
         self.assertNotIn("Alexandre Lacazette", self.odds)
-        self.assertEqual(len(self.odds), 15)
+        self.assertEqual(len(self.odds), 19)
 
     def test_every_market_read_exists_in_the_model(self) -> None:
         stats = demo.stats_for("Olympique Lyonnais", "Stade Rennais")
         known = poisson.compute(stats).markets
         for market in self.odds:
+            if market in forebet.HALF_TIME_MARKETS or market.startswith(bookmakers.SCORER_PREFIX):
+                continue  # jamais chiffres par le modele : mi-temps Forebet, buteur par sa cote
             self.assertIn(market, known)
 
 
@@ -1096,6 +1140,101 @@ class TestKelly(unittest.TestCase):
     def test_stake_is_capped(self) -> None:
         """Une probabilite surestimee ne doit pas faire conseiller un tiers du capital."""
         self.assertEqual(kelly_share(95.0, 1.35), KELLY_MAX_SHARE)
+
+
+class TestRequestedTickets(unittest.TestCase):
+    def _bundle(self, index: int, markets: dict[str, float], odds: dict[str, float]) -> MatchBundle:
+        stats = MatchStats(
+            home_team=f"Equipe {index}",
+            away_team=f"Visiteur {index}",
+            kickoff=f"2026-07-26 1{index}:00",
+        )
+        return MatchBundle(
+            stats=stats,
+            poisson=PoissonResult(
+                prob_home=40.0,
+                prob_draw=30.0,
+                prob_away=30.0,
+                prob_over_25=50.0,
+                prob_btts=50.0,
+                expected_home_goals=1.4,
+                expected_away_goals=1.1,
+                most_likely_score="1-1",
+                markets=markets,
+            ),
+            bookmakers=[BookmakerLine(bookmaker="Unibet", odds=odds)],
+        )
+
+    def _btts(self, index: int, yes: float) -> MatchBundle:
+        return self._bundle(
+            index,
+            {BTTS_YES: yes, BTTS_NO: 100 - yes},
+            {BTTS_YES: 1.60, BTTS_NO: 1.60},
+        )
+
+    def _mixed(self, count: int, skip: str = "") -> list[MatchBundle]:
+        bundles = []
+        for index in range(count):
+            markets = {"1N": 80.0, "Plus de 2.5 buts": 70.0}
+            odds = {"1N": 1.25, "Plus de 2.5 buts": 1.50, "Buteur : Joueur": 2.0}
+            forebet = ForebetPrediction("A", "B", markets={"1 (1re mi-temps)": 50.0})
+            odds["1 (1re mi-temps)"] = 2.0
+            for name in [name for name in odds if name.startswith(skip)] if skip else []:
+                del odds[name]
+            bundle = self._bundle(index, markets, odds)
+            bundle.forebet = forebet
+            bundles.append(bundle)
+        return bundles
+
+    def test_split_takes_two_yes_and_two_no_on_four_matches(self) -> None:
+        bundles = [self._btts(index, yes) for index, yes in enumerate((75, 70, 65, 35, 30, 25))]
+        ticket = build_btts_split_ticket(bundles)
+        assert ticket is not None
+        markets = [leg.market for leg in ticket.legs]
+        self.assertEqual((markets.count(BTTS_YES), markets.count(BTTS_NO)), (2, 2))
+        self.assertEqual(len({leg.match for leg in ticket.legs}), 4)
+        self.assertIn("Equipe 0 vs Visiteur 0", [leg.match for leg in ticket.legs])
+        self.assertIn("Equipe 5 vs Visiteur 5", [leg.match for leg in ticket.legs])
+
+    def test_four_yes_are_kept_whole(self) -> None:
+        """Quatre oui, meme sous le plancher d'une chance sur trois."""
+        bundles = [self._btts(index, 65.0) for index in range(5)]
+        ticket = build_btts_split_ticket(bundles, yes=4, no=0)
+        assert ticket is not None
+        self.assertEqual([leg.market for leg in ticket.legs], [BTTS_YES] * 4)
+        self.assertLess(ticket.probability, MIN_TICKET_PROBABILITY)
+        self.assertEqual(ticket.label, "Combine 4 matchs : les deux marquent (4 oui)")
+
+    def test_split_ignores_the_one_in_three_floor(self) -> None:
+        bundles = [self._btts(index, yes) for index, yes in enumerate((60, 60, 40, 40))]
+        ticket = build_btts_split_ticket(bundles)
+        assert ticket is not None
+        self.assertLess(ticket.probability, MIN_TICKET_PROBABILITY)
+
+    def test_split_needs_both_sides(self) -> None:
+        self.assertIsNone(build_btts_split_ticket([self._btts(i, 75) for i in range(6)]))
+
+    def test_mixed_six_and_eight_cover_the_four_families(self) -> None:
+        for size, scorers in ((6, 1), (8, 2)):
+            with self.subTest(size=size):
+                ticket = build_mixed_ticket(self._mixed(10), legs=size)
+                assert ticket is not None
+                markets = [leg.market for leg in ticket.legs]
+                self.assertEqual(len(markets), size)
+                self.assertEqual(len({leg.match for leg in ticket.legs}), size)
+                self.assertEqual(sum(m.startswith("Buteur") for m in markets), scorers)
+                self.assertIn("1 (1re mi-temps)", markets)
+                self.assertIn("1N", markets)
+                self.assertIn("Plus de 2.5 buts", markets)
+
+    def test_scorer_probability_comes_from_the_odds_minus_the_margin(self) -> None:
+        ticket = build_mixed_ticket(self._mixed(6), legs=6)
+        assert ticket is not None
+        leg = next(leg for leg in ticket.legs if leg.market.startswith("Buteur"))
+        self.assertEqual((leg.probability, leg.source), (42.5, "cote"))
+
+    def test_mixed_without_a_family_is_not_proposed(self) -> None:
+        self.assertIsNone(build_mixed_ticket(self._mixed(10, skip="Buteur"), legs=6))
 
 
 class TestCombo(unittest.TestCase):
@@ -1267,11 +1406,11 @@ class TestMaxTicket(unittest.TestCase):
     def test_report_adds_the_max_ticket_only_when_it_is_longer(self) -> None:
         """Avec huit matchs valides, le combine 8 est deja le maximum : pas de doublon."""
         eight = [self._bundle(index, 95.0) for index in range(8)]
-        self.assertEqual([len(t.legs) for t in report.value_tickets(eight)], [6, 8])
+        self.assertEqual([len(t.legs) for t in report.value_tickets(eight)], [4, 6, 8])
         nine = [*eight, self._bundle(8, 90.0)]
-        self.assertEqual([len(t.legs) for t in report.value_tickets(nine)], [6, 8, 9])
+        self.assertEqual([len(t.legs) for t in report.value_tickets(nine)], [4, 6, 8, 9])
         five = eight[:5]
-        self.assertEqual([len(t.legs) for t in report.value_tickets(five)], [5])
+        self.assertEqual([len(t.legs) for t in report.value_tickets(five)], [4, 5])
 
 
 class TestForebetSourcedLegs(unittest.TestCase):
