@@ -12,9 +12,12 @@ from betbot.combo import (
     MAX_LEG_VALUE,
     MIN_LEG_ODDS,
     MIN_LEG_PROBABILITY,
+    MIXED_TICKET_QUOTAS,
     VALUE_TICKET_SIZES,
     Ticket,
+    build_btts_split_ticket,
     build_max_ticket,
+    build_mixed_ticket,
     build_value_ticket,
     kelly_share,
     market_calibrated,
@@ -423,13 +426,27 @@ def _ticket_block(ticket: Ticket, stake: float = 10.0) -> str:
     return "\n".join(rows)
 
 
+def requested_tickets(bundles: list[MatchBundle]) -> list[tuple[str, Ticket | None]]:
+    """Combines a composition imposee, avec leur nom pour dire lesquels manquent."""
+    tickets = [
+        ("Combine 4 matchs 4 oui", build_btts_split_ticket(bundles, yes=4, no=0)),
+        ("Combine 4 matchs 2 oui / 2 non", build_btts_split_ticket(bundles)),
+    ]
+    tickets += [
+        (f"Combine panache {size} selections", build_mixed_ticket(bundles, legs=size))
+        for size in MIXED_TICKET_QUOTAS
+    ]
+    return tickets
+
+
 def value_tickets(bundles: list[MatchBundle]) -> list[Ticket]:
     """Combines proposes en fin de rapport : les tailles fixes, puis le maximum.
 
     Le combine maximum n'est ajoute que s'il contient plus de selections que le plus
     long des tickets fixes : sinon il en serait la copie.
     """
-    tickets = [build_value_ticket(bundles, legs=size) for size in VALUE_TICKET_SIZES]
+    tickets = [ticket for _, ticket in requested_tickets(bundles)]
+    tickets += [build_value_ticket(bundles, legs=size) for size in VALUE_TICKET_SIZES]
     everything = build_max_ticket(bundles)
     if everything and len(everything.legs) not in VALUE_TICKET_SIZES:
         tickets.append(everything)
@@ -464,7 +481,11 @@ def _ticket_to_dict(ticket: Ticket, stake: float = 10.0) -> dict:
 
 def _value_tickets_block(bundles: list[MatchBundle]) -> list[str]:
     """Combines longs, marches melanges, classes du plus probable au plus gros gain."""
-    parts: list[str] = []
+    parts = [
+        f"_{name} : pas assez de selections cotees aujourd'hui._\n"
+        for name, ticket in requested_tickets(bundles)
+        if ticket is None
+    ]
     for ticket in value_tickets(bundles):
         parts += [
             f"## {ticket.label or f'Combine {len(ticket.legs)} selections (marches melanges)'}",

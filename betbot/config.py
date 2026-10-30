@@ -79,14 +79,19 @@ class LMStudioConfig:
 
     base_url: str = os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
     api_key: str = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
-    model: str = os.getenv("LMSTUDIO_MODEL", "qwen/qwen3-14b")
-    temperature: float = float(os.getenv("LMSTUDIO_TEMPERATURE", "0"))
-    # Le bloc <think> de Qwen3 compte dans la reponse : 2048 le faisait tronquer.
-    max_tokens: int = int(os.getenv("LMSTUDIO_MAX_TOKENS", "4096"))
+    # MiMo-7B-RL (Xiaomi) : modele de raisonnement 7B, large sur les 12 Go d'une RTX 5070.
+    # L'identifiant doit correspondre a celui affiche par LM Studio (sinon --model).
+    model: str = os.getenv("LMSTUDIO_MODEL", "xiaomimimo/mimo-7b-rl")
+    # MiMo recommande 0.6 : un modele de raisonnement a 0 tourne en boucle. --temperature 0
+    # reste possible pour des reponses plus tranchees.
+    temperature: float = float(os.getenv("LMSTUDIO_TEMPERATURE", "0.6"))
+    # MiMo raisonne toujours (le bloc de reflexion compte dans la reponse) : on laisse de la
+    # marge pour que le JSON final ne soit pas tronque. Le bloc <think> est retire ensuite.
+    max_tokens: int = int(os.getenv("LMSTUDIO_MAX_TOKENS", "8192"))
     timeout: float = float(os.getenv("LMSTUDIO_TIMEOUT", "600"))
-    # Mode reflexion de Qwen3 (bloc <think>) : coupe par defaut, il multipliait le temps
-    # par match jusqu'au delai d'attente sans ameliorer les reponses fermees.
-    thinking: bool = os.getenv("LMSTUDIO_THINKING", "0") not in ("0", "false", "non")
+    # Reflexion du modele. Sur MiMo elle est intrinseque et ne se coupe pas ; le reglage ne
+    # vaut que pour les modeles facultatifs facon Qwen3 (interrupteur /no_think, voir llm.py).
+    thinking: bool = os.getenv("LMSTUDIO_THINKING", "1") not in ("0", "false", "non")
     # Second appel « avocat du diable » : le LLM cherche ce qui contredit sa premiere
     # analyse. Double le temps par match.
     second_pass: bool = os.getenv("LMSTUDIO_SECOND_PASS", "1") not in ("0", "false", "non")
