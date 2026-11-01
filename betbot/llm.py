@@ -190,8 +190,9 @@ class LMStudioClient:
         return [item["id"] for item in response.json().get("data", [])]
 
     def chat(self, system: str, user: str) -> str:
-        if not self.cfg.thinking:
-            # Interrupteur doux de Qwen3 ; les autres modeles l'ignorent.
+        if not self.cfg.thinking and "qwen" in self.cfg.model.lower():
+            # Interrupteur doux, propre a Qwen3. MiMo et les modeles de raisonnement
+            # reflechissent de toute facon : on ne pollue pas leur prompt avec.
             user = f"{user.rstrip()}\n/no_think"
         payload = {
             "model": self.cfg.model,

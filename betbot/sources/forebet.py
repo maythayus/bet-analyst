@@ -54,7 +54,10 @@ def _parse_probabilities(row: Tag) -> tuple[float | None, float | None, float | 
     container = row.select_one(".fprc")
     if container is None:
         return None, None, None
-    values = [_to_float(span.get_text()) for span in container.select("span")]
+    # Enfants directs seulement : sur la page mi-temps, le pronostic retenu porte un
+    # <span class="fpr"> imbrique qui compterait sinon deux fois.
+    spans = container.find_all("span", recursive=False)
+    values = [_to_float(span.get_text()) for span in spans]
     values = [v for v in values if v is not None]
     if len(values) >= 3:
         return values[0], values[1], values[2]
@@ -74,7 +77,9 @@ def parse_predictions(html: str, limit: int | None = None) -> list[ForebetPredic
     """Extrait les predictions d'une page de listing Forebet."""
     soup = BeautifulSoup(html, "html.parser")
     rows = soup.select("div.rcnt")
-    predictions: list[ForebetPrediction] = []
+    # Une rencontre peut revenir dans un bloc de la page, sans probabilites : une seule
+    # entree par match, celle qui porte le pronostic.
+    predictions: dict[tuple[str, str], ForebetPrediction] = {}
 
     for row in rows:
         home = _first_text(row, [".homeTeam span", ".homeTeam", ".hom"])
@@ -86,26 +91,27 @@ def parse_predictions(html: str, limit: int | None = None) -> list[ForebetPredic
         link = row.select_one("a[href]")
         href = link["href"] if isinstance(link, Tag) and link.has_attr("href") else None
 
-        predictions.append(
-            ForebetPrediction(
-                home_team=home,
-                away_team=away,
-                kickoff=_first_text(row, [".date_bah", ".date", ".stime"]),
-                competition=_first_text(row, [".shortTag", ".tnmscn a", ".leag"]),
-                prob_home=prob_home,
-                prob_draw=prob_draw,
-                prob_away=prob_away,
-                predicted_score=_first_text(row, [".ex_sc", ".predict_y", ".ex"]),
-                avg_goals=_to_float(_first_text(row, [".avg_sc", ".avgsc"])),
-                odds=_parse_odds(row),
-                url=f"{BASE}{href}" if href and href.startswith("/") else href,
-            )
+        known = predictions.get((home, away))
+        if known and (known.prob_home is not None or prob_home is None):
+            continue
+        predictions[(home, away)] = ForebetPrediction(
+            home_team=home,
+            away_team=away,
+            kickoff=_first_text(row, [".date_bah", ".date", ".stime"]),
+            competition=_first_text(row, [".shortTag", ".tnmscn a", ".leag"]),
+            prob_home=prob_home,
+            prob_draw=prob_draw,
+            prob_away=prob_away,
+            predicted_score=_first_text(row, [".ex_sc", ".predict_y", ".ex"]),
+            avg_goals=_to_float(_first_text(row, [".avg_sc", ".avgsc"])),
+            odds=_parse_odds(row),
+            url=f"{BASE}{href}" if href and href.startswith("/") else href,
         )
         if limit and len(predictions) >= limit:
             break
 
     log.info("Forebet : %d predictions extraites", len(predictions))
-    return predictions
+    return list(predictions.values())
 
 
 # La mi-temps n'a pas d'equivalent dans le modele : ces marches restent informatifs.

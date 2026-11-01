@@ -29,7 +29,7 @@ Il **croise quatre sources** pour chaque rencontre pariable :
    équipes marquent », doubles chances et combinés lus sur la page de chaque match.
 
 Le tout est ensuite résumé par un **LLM local** (par défaut
-`qwen/qwen3-14b` dans LM Studio ; `--model` pour en changer), dont le rôle
+`xiaomimimo/mimo-7b-rl` dans LM Studio ; `--model` pour en changer), dont le rôle
 est de commenter les désaccords entre sources — pas d'inventer un pronostic.
 
 Sont analysés **les matchs pariables, et eux seuls** : dès que les cotes Unibet sont
@@ -293,23 +293,28 @@ mise, gagnante ou perdante. Aucun logiciel ne supprime cette marge.
 Le seul élément exigeant est le LLM local. Le reste (scraping, Poisson, rapports) tourne
 sur n'importe quelle machine : quelques centaines de Mo de RAM et aucun GPU.
 
-Modèle de référence : **Qwen3-14B** (14 milliards de paramètres), chargé dans LM Studio
-sous l'identifiant `qwen/qwen3-14b`.
+Modèle de référence : **MiMo-7B-RL** (Xiaomi, 7 milliards de paramètres, orienté
+raisonnement), chargé dans LM Studio sous un identifiant du type `xiaomimimo/mimo-7b-rl`.
 
 | Quantification | Taille du fichier | VRAM à prévoir | Commentaire |
 | --- | --- | --- | --- |
-| `Q4_K_M` | ~9 Go | **12 Go** | le bon compromis, celui utilisé ici |
-| `Q3_K_M` | ~7 Go | 10 Go | si la VRAM manque ; qualité en retrait |
-| `Q5_K_M` | ~10.5 Go | 14 Go | ne tient plus entièrement sur 12 Go |
+| `Q5_K_M` | ~5.5 Go | **8 Go** | qualité quasi pleine, tient très large sur 12 Go |
+| `Q4_K_M` | ~4.5 Go | 7 Go | le bon compromis par défaut |
+| `Q8_0` | ~8 Go | 10 Go | précision maximale si tu veux pousser |
 
-La VRAM indiquée inclut le contexte : à 16384 tokens, le cache occupe environ 1.5 Go
-en plus du fichier. Sur une **RTX 5070 (12 Go)**, `Q4_K_M` avec 16384 tokens tient,
-GPU offload au maximum. Qwen3 réfléchit dans un bloc `<think>` avant de répondre (retiré
-du rapport) : ces tokens comptent dans la réponse, d'où un `max_tokens` à 4096.
+Un 7B en `Q4_K_M`/`Q5_K_M` ne remplit qu'une fraction des 12 Go d'une **RTX 5070** : tu
+peux charger un **contexte de 16384 tokens** avec GPU offload au maximum et il reste de la
+marge. MiMo est un modèle de **raisonnement** : il réfléchit avant de répondre (bloc
+retiré du rapport), et ces tokens comptent dans la réponse — d'où un `max_tokens` à 8192.
+Température recommandée **0.6** (défaut) ; à 0 un modèle de raisonnement tourne en boucle.
+
+> Pourquoi ce changement : à qualité de commentaire comparable sur cette tâche fermée,
+> un 7B de raisonnement libère la VRAM, répond plus vite et laisse de la place au contexte.
+> Pour revenir à Qwen3-14B : `--model qwen/qwen3-14b --temperature 0` (ou `LMSTUDIO_MODEL`).
 
 | Composant | Minimum | Confortable |
 | --- | --- | --- |
-| GPU | 12 Go de VRAM (RTX 4070, 5070) pour Qwen3-14B `Q4_K_M` | 16 Go et plus |
+| GPU | 8 Go de VRAM suffisent pour MiMo-7B-RL `Q4_K_M` (RTX 4060/5070) | 12 Go et plus |
 | RAM système | 16 Go | 32 Go |
 | Disque | 15 Go libres (modèle + Chromium + caches) | 25 Go |
 | Connexion | indispensable (Unibet, Flashscore) | — |
@@ -318,9 +323,8 @@ du rapport) : ces tokens comptent dans la réponse, d'où un `max_tokens` à 409
 
 - Laisser LM Studio décharger une partie des couches sur le CPU : ça fonctionne, mais
   comptez plusieurs minutes par match plutôt que quelques secondes.
-- Prendre un Qwen3 plus léger, `qwen/qwen3-8b` en `Q4_K_M` (~5 Go, 8 Go de VRAM) ou
-  `qwen/qwen3-4b` (~2.5 Go), avec `python -m betbot --model <identifiant>` : même
-  format de réponse, commentaire moins fin.
+- Prendre un modèle encore plus léger, `qwen/qwen3-4b` (~2.5 Go) par exemple, avec
+  `python -m betbot --model <identifiant>` : même format de réponse, commentaire moins fin.
 
 **Sans LLM du tout**, `--no-llm` produit le rapport complet — probabilités, cotes, valeur,
 ticket — sans le commentaire rédigé. C'est la partie chiffrée, et elle ne dépend pas du
@@ -398,9 +402,11 @@ cd bet-analyst
 
 ## Côté LM Studio
 
-1. Télécharge **Qwen3-14B** en `Q4_K_M` (~9 Go, tient dans les 12 Go de la 5070). Si
-   LM Studio l'affiche sous un autre identifiant que `qwen/qwen3-14b`, passe-le par
-   `--model` ou `LMSTUDIO_MODEL`.
+1. Télécharge **MiMo-7B-RL** en `Q4_K_M` ou `Q5_K_M` (~4,5–5,5 Go). Si LM Studio
+   l'affiche sous un autre identifiant que `xiaomimimo/mimo-7b-rl`, passe-le par
+   `--model` ou `LMSTUDIO_MODEL` (l'app peut lister les modèles chargés). MiMo
+   recommande un **prompt système vide** côté LM Studio ; l'app, elle, a besoin de ses
+   consignes et les envoie telles quelles — ne touche pas à ce réglage.
 2. Charge-le avec un contexte de 16384 tokens et **GPU offload au maximum**.
 3. Onglet **Developer** → **Start Server** (par défaut `http://localhost:1234`).
 
@@ -710,6 +716,23 @@ Lyon vs Rennes;1N et oui;2.35
 python -m betbot --matches 20 --only-bettable --odds-csv cotes.csv
 ```
 
+### Combinés à composition imposée
+
+Le rapport commence par quatre combinés dont la composition est fixée. Le plancher d'une
+chance sur trois ne s'y applique pas : **leur probabilité est souvent très faible**, et
+elle est affichée telle quelle. S'il manque des sélections, une ligne le dit à la place.
+
+- **4 matchs « les deux marquent »**, en deux versions : 4 oui, et 2 oui + 2 non. Les plus
+  probables, un par match (au moins 55 %, cotés en priorité).
+- **Panachés 6 et 8 sélections** : buteur, mi-temps, double chance, plus/moins de 2.5 buts,
+  un par match, tous cotés. Répartition : 1 + 1 + 2 + 2 pour le 6, 2 + 2 + 2 + 2 pour le 8.
+
+Le **buteur** est le joueur le moins coté de son match, `Buteur : Nom` dans la colonne
+Marché. Aucune source ne chiffre sa chance : elle vient de la cote Unibet, marge retirée
+(× 0,85), source `cote`. Ce n'est pas une prédiction, et un joueur remplaçant peut ne pas
+jouer du tout. La **mi-temps** (1 N 2) vient de Forebet, à 45 % minimum. Une sélection
+dont la valeur dépasse +25 % est écartée, quel que soit le modèle.
+
 ### Combinés 6, 8 et maximum
 
 À la suite du ticket `--combo`, le rapport ajoute automatiquement deux combinés longs à
@@ -848,11 +871,11 @@ Les rapports sont écrits dans `out/` : `rapport-<date>.md` (lisible) et
 | Variable | Défaut | Rôle |
 | --- | --- | --- |
 | `LMSTUDIO_BASE_URL` | `http://localhost:1234/v1` | API LM Studio |
-| `LMSTUDIO_MODEL` | `qwen/qwen3-14b` | modèle chargé |
-| `LMSTUDIO_MAX_TOKENS` | `4096` | longueur maximale de la réponse, bloc `<think>` compris |
-| `LMSTUDIO_TEMPERATURE` | `0` | déterminisme (à laisser à 0) |
+| `LMSTUDIO_MODEL` | `xiaomimimo/mimo-7b-rl` | modèle chargé |
+| `LMSTUDIO_MAX_TOKENS` | `8192` | longueur maximale de la réponse, raisonnement compris |
+| `LMSTUDIO_TEMPERATURE` | `0.6` | recommandé pour MiMo ; `0` possible avec un modèle non raisonnant |
 | `LMSTUDIO_SECOND_PASS` | `1` | `0` pour supprimer le second appel « avocat du diable » |
-| `LMSTUDIO_THINKING` | `0` | `1` pour réactiver le bloc `<think>` de Qwen3 (beaucoup plus lent, coupé par `/no_think` sinon) |
+| `LMSTUDIO_THINKING` | `1` | raisonnement ; `0` ajoute `/no_think` uniquement pour un modèle Qwen3 |
 | `LMSTUDIO_TIMEOUT` | `600` | secondes d'attente par appel avant « Read timed out » |
 | `MAX_MATCHES` | `10` | nombre de matchs |
 | `FLASHSCORE_HEADLESS` | `1` | `0` pour voir le navigateur |

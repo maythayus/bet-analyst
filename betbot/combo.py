@@ -13,6 +13,8 @@ from math import prod
 from betbot import consensus
 from betbot.models import MatchBundle
 from betbot.poisson import CALIBRATED_SOURCES
+from betbot.sources.bookmakers import SCORER_PREFIX
+from betbot.sources.forebet import HALF_TIME_MARKETS
 from betbot.trap import trap_reasons
 
 # Chez les bookmakers le nul s'ecrit X, dans le modele il s'ecrit N.
@@ -23,6 +25,20 @@ VALUE_TICKET_SIZES = (6, 8)
 BTTS_YES = "Les deux marquent : oui"
 BTTS_NO = "Les deux marquent : non"
 MAX_TICKET_LABEL = "Combine maximum ({count} selections : tout ce qui passe)"
+BTTS_SPLIT_LABEL = "Combine {count} matchs : les deux marquent ({detail})"
+MIXED_TICKET_LABEL = "Combine {count} selections (buteur, mi-temps, double chance, +/- 2.5 buts)"
+DOUBLE_CHANCE_MARKETS = ("1N", "12", "N2")
+GOALS_25_MARKETS = ("Plus de 2.5 buts", "Moins de 2.5 buts")
+# Selections par famille du combine panache : (buteur, mi-temps, double chance, +/- 2.5).
+# Le reste va aux deux familles les plus sures.
+MIXED_TICKET_QUOTAS = {6: (1, 1, 2, 2), 8: (2, 2, 2, 2)}
+# Le 1 N 2 de mi-temps a trois issues et beaucoup de nuls : une chance sur deux y est deja
+# une prediction nette, le seuil des autres marches n'y laisserait presque rien.
+MIN_HALF_TIME_PROBABILITY = 45.0
+# Aucune source ne chiffre un buteur : la probabilite vient de sa cote, marge retiree. Le
+# retour aux joueurs est plafonne a 85 % en moyenne en France ; c'est un ordre de grandeur.
+SCORER_RETURN = 0.85
+SOURCE_ODDS = "cote"
 # Marches ou Forebet publie sa propre probabilite : elle y est reunie a celle du modele
 # (voir `betbot.consensus`), et la selection exige `FOREBET_MIN_PROBABILITY` du consensus.
 FOREBET_MARKETS = (BTTS_YES, BTTS_NO, "1N", "N2", "12")
@@ -332,6 +348,104 @@ def build_max_ticket(
     if ticket.probability < MIN_TICKET_PROBABILITY:
         return None
     return _chronological(ticket)
+
+
+def _distinct_matches(candidates: list[Leg], count: int, used: set[str]) -> list[Leg]:
+    """Les `count` selections les plus probables, cotees d'abord, une par match."""
+    ranked = sorted(candidates, key=lambda leg: (leg.odds is not None, leg.probability))
+    chosen: list[Leg] = []
+    for leg in reversed(ranked):
+        if len(chosen) < count and leg.match not in used:
+            used.add(leg.match)
+            chosen.append(leg)
+    return chosen
+
+
+def build_btts_split_ticket(
+    bundles: list[MatchBundle], *, yes: int = 2, no: int = 2
+) -> Ticket | None:
+    """Combine « les deux marquent » en oui et non imposes, un match par selection.
+
+    Demande explicite : `MIN_TICKET_PROBABILITY` ne s'applique pas, la probabilite du
+    ticket est affichee telle quelle. Sans assez de selections d'un cote, pas de ticket.
+    """
+    used: set[str] = set()
+    legs: list[Leg] = []
+    for market, count in ((BTTS_YES, yes), (BTTS_NO, no)):
+        candidates = [
+            leg
+            for bundle in bundles
+            if (leg := _leg_for(bundle, market, bundle.market_prices().get(market), MIN_LEG_PROBABILITY))
+        ]
+        chosen = _distinct_matches(candidates, count, used)
+        if len(chosen) < count:
+            return None
+        legs += chosen
+    detail = f"{yes} oui, {no} non" if no else f"{yes} oui"
+    label = BTTS_SPLIT_LABEL.format(count=yes + no, detail=detail)
+    return _chronological(Ticket(legs, label=label))
+
+
+def _market_legs(bundle: MatchBundle, markets: tuple[str, ...], floor: float) -> list[Leg]:
+    """Selections cotees d'une famille de marches, au consensus Forebet + modele.
+
+    Une valeur au-dela de `MAX_LEG_VALUE` trahit une estimation trop eloignee de la cote :
+    la selection est ecartee, quel que soit le modele.
+    """
+    prices = bundle.market_prices()
+    legs: list[Leg] = []
+    for market in markets:
+        odds = prices.get(market)
+        agreed = consensus.for_market(bundle, market) if odds and odds >= MIN_LEG_ODDS else None
+        if agreed is None or agreed.probability < floor:
+            continue
+        leg = Leg(
+            bundle.label, market, agreed.probability, odds, bundle.stats.kickoff, agreed.source
+        )
+        traps = trap_reasons(bundle.stats, market, bundle.predicted_score, bundle.forebet)
+        if not traps and _leg_value(leg) <= MAX_LEG_VALUE:
+            legs.append(leg)
+    return legs
+
+
+def _scorer_legs(bundle: MatchBundle) -> list[Leg]:
+    """Buteur le plus probable du match d'apres sa cote, marge retiree."""
+    prices = {
+        market: odds
+        for market, odds in bundle.market_prices().items()
+        if market.startswith(SCORER_PREFIX) and odds >= MIN_LEG_ODDS
+    }
+    if not prices:
+        return []
+    market = min(prices, key=lambda name: prices[name])
+    probability = round(100 * SCORER_RETURN / prices[market], 1)
+    kickoff = bundle.stats.kickoff
+    return [Leg(bundle.label, market, probability, prices[market], kickoff, SOURCE_ODDS)]
+
+
+def build_mixed_ticket(bundles: list[MatchBundle], *, legs: int) -> Ticket | None:
+    """Combine panache : buteur, mi-temps, double chance et +/- 2.5 buts, un match par selection.
+
+    Les familles les plus rares sont servies d'abord, chacune selon `MIXED_TICKET_QUOTAS`.
+    Demande explicite : `MIN_TICKET_PROBABILITY` ne s'applique pas, mais toutes les
+    selections sont cotees et la probabilite, souvent faible, est affichee telle quelle.
+    S'il manque une famille, pas de ticket : il ne serait plus celui demande.
+    """
+    families = (
+        _scorer_legs,
+        lambda bundle: _market_legs(bundle, HALF_TIME_MARKETS, MIN_HALF_TIME_PROBABILITY),
+        lambda bundle: _market_legs(bundle, DOUBLE_CHANCE_MARKETS, MIN_LEG_PROBABILITY),
+        lambda bundle: _market_legs(bundle, GOALS_25_MARKETS, MIN_LEG_PROBABILITY),
+    )
+    used: set[str] = set()
+    selections: list[Leg] = []
+    for family, count in zip(families, MIXED_TICKET_QUOTAS[legs], strict=True):
+        candidates = [leg for bundle in bundles for leg in family(bundle)]
+        chosen = _distinct_matches(candidates, count, used)
+        if len(chosen) < count:
+            return None
+        selections += chosen
+    return _chronological(Ticket(selections, label=MIXED_TICKET_LABEL.format(count=legs)))
 
 
 def build_value_ticket(

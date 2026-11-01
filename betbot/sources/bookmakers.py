@@ -27,6 +27,7 @@ from bs4 import BeautifulSoup
 from betbot.config import USER_AGENT, ScrapeConfig
 from betbot.names import SIMILARITY_THRESHOLD, normalise, similarity, teams_match
 from betbot.poisson import FIRST_HALF_BTTS
+from betbot.sources.forebet import HALF_TIME_MARKETS
 
 __all__ = ["SIMILARITY_THRESHOLD", "normalise", "similarity", "teams_match"]
 
@@ -75,6 +76,11 @@ DETAIL_MARKET_TITLES = re.compile(
 # Les deux equipes marquent par periode : une carte a part, dont la premiere colonne
 # porte la premiere mi-temps et la seconde la deuxieme.
 HALF_BTTS_TITLE = re.compile(r"^les 2 equipes marqueront elles \? - periodes$")
+# Resultat a la mi-temps, dans l'ordre 1 N 2, et buteurs : la premiere colonne de cette
+# carte est « Buteur » (a tout moment du match), avant « 1er Buteur » et « Dernier buteur ».
+HALF_TIME_TITLE = "1 n 2 - 1ere mi-temps"
+SCORERS_TITLE = "buteurs - 90 mins"
+SCORER_PREFIX = "Buteur : "
 # Seuil de buts en fin de libelle : « Plus 2.5 », « et moins de 1,5 buts ».
 GOALS_CLAUSE = re.compile(r"\b(plus|moins)\s+(?:de\s+)?(\d)[.,](\d)\s*(?:buts?)?$")
 # Doubles chances : la paire de signes, triee, donne le nom du marche.
@@ -187,6 +193,12 @@ def parse_event_markets(html: str, home: str, away: str) -> dict[str, float]:
             if price:
                 odds[FIRST_HALF_BTTS] = price
             continue
+        if heading == HALF_TIME_TITLE:
+            odds.update(_half_time_result(card))
+            continue
+        if heading == SCORERS_TITLE:
+            odds.update(_scorers(card))
+            continue
         if not DETAIL_MARKET_TITLES.match(heading):
             continue
 
@@ -223,6 +235,25 @@ def _first_half_btts(card) -> float | None:
         ]
         return prices[0] if prices else None
     return None
+
+
+def _half_time_result(card) -> dict[str, float]:
+    """Cotes 1 N 2 de la premiere periode, rien si une issue est suspendue."""
+    prices = [_price_text(node) for node in card.select("psel-outcome .psel-outcome__data")]
+    if len(prices) != len(HALF_TIME_MARKETS) or None in prices:
+        return {}
+    return dict(zip(HALF_TIME_MARKETS, prices, strict=True))
+
+
+def _scorers(card) -> dict[str, float]:
+    """Cote « Buteur » de chaque joueur, premiere colonne de sa ligne."""
+    odds: dict[str, float] = {}
+    for row in card.select("tbody tr"):
+        header, column = row.select_one("th"), row.select_one("td")
+        price = _price_text(column.select_one(".psel-outcome__data")) if column else None
+        if header and price:
+            odds[f"{SCORER_PREFIX}{header.get_text(strip=True)}"] = price
+    return odds
 
 
 _session: requests.Session | None = None
